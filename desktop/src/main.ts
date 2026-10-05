@@ -1,0 +1,258 @@
+import { execFile } from "node:child_process";
+import { createWriteStream, mkdirSync, readFileSync, writeFileSync, type WriteStream } from "node:fs";
+import { createServer } from "node:net";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, screen, session, shell, type MenuItemConstructorOptions, type Rectangle, type WebPreferences } from "electron";
+import { missingProductionBuilds, startLocalServers, type LocalServerName, type LocalServers } from "../../scripts/local-servers.mjs";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(here, "../..");
+const loadingPage = path.join(here, "../static/loading.html");
+const mode = process.argv.includes("--dev") ? "dev" : "start";
+// pnpm records the Node.js binary that ran the script; Electron's own binary cannot run the servers.
+const nodePath = process.env.npm_node_execpath || "node";
+const uiPort = Number(process.env.BEEBLIO_DESKTOP_PORT || 3210);
+const uiOrigin = `http://127.0.0.1:${uiPort}`;
+const windowStateFile = () => path.join(app.getPath("userData"), "window-state.json");
+const serverLabels: Record<LocalServerName, string> = { "drizzle-kit": "database migration", next: "interface server", eve: "agent server" };
+
+let servers: LocalServers | undefined;
+let mainWindow: BrowserWindow | undefined;
+let logStream: WriteStream | undefined;
+let recentLog: string[] = [];
+let starting = false;
+let stopReason: string | undefined;
+let quitting = false;
+
+const secureWebPreferences = (): WebPreferences => ({
+  preload: path.join(here, "preload.cjs"),
+  contextIsolation: true,
+  sandbox: true,
+  nodeIntegration: false,
+  spellcheck: true,
+});
+
+function isAppUrl(url: string | undefined): boolean {
+  try { return !!url && new URL(url).origin === uiOrigin; } catch { return false; }
+}
+
+function openExternally(url: string) {
+  if (/^(https?|mailto):/i.test(url)) void shell.openExternal(url);
+}
+
+function log(name: string, chunk: Buffer | string) {
+  const text = chunk.toString();
+  process.stdout.write(text);
+  logStream?.write(text);
+  recentLog.push(...text.split(/\r?\n/).filter(Boolean).map((line) => `[${name}] ${line}`));
+  if (recentLog.length > 200) recentLog = recentLog.slice(-200);
+}
+
+function canListen(port: number): Promise<number | undefined> {
+  return new Promise((resolve) => {
+    const server = createServer();
+    server.once("error", () => resolve(undefined));
+    server.listen(port, "127.0.0.1", () => {
+      const address = server.address();
+      server.close(() => resolve(typeof address === "object" && address ? address.port : undefined));
+    });
+  });
+}
+
+async function nodeMajorVersion(): Promise<number | undefined> {
+  try {
+    const { stdout } = await promisify(execFile)(nodePath, ["-p", "process.versions.node"]);
+    return Number(stdout.trim().split(".")[0]);
+  } catch { return undefined; }
+}
+
+/** Explains why Beeblio cannot start; resolves true when the person asks to try again. */
+async function showStartupProblem(message: string, detail: string): Promise<boolean> {
+  for (;;) {
+    const { response } = await dialog.showMessageBox({ type: "error", message, detail, buttons: ["Try Again", "Open Logs", "Quit"], defaultId: 0, cancelId: 2 });
+    if (response === 1) { void shell.openPath(path.join(app.getPath("logs"), "servers.log")); continue; }
+    return response === 0;
+  }
+}
+
+async function checkPrerequisites(): Promise<{ message: string; detail: string } | undefined> {
+  const major = await nodeMajorVersion();
+  if (!major || major < 24) {
+    return { message: "Beeblio needs Node.js 24", detail: `Could not run Node.js 24 from "${nodePath}". Install Node.js 24 and start the app with pnpm desktop.` };
+  }
+  const missing = mode === "start" ? missingProductionBuilds(repoRoot) : [];
+  if (missing.length) {
+    return { message: "Build Beeblio before starting the desktop app", detail: `Run ${missing.join(" && ")} in ${repoRoot}, or use pnpm desktop:dev to run the development servers.` };
+  }
+  if (!(await canListen(uiPort))) {
+    return { message: `Port ${uiPort} is already in use`, detail: "Close the program using it, or set BEEBLIO_DESKTOP_PORT to another port." };
+  }
+  return undefined;
+}
+
+async function startServers(): Promise<void> {
+  for (;;) {
+    const problem = await checkPrerequisites();
+    if (problem) {
+      if (await showStartupProblem(problem.message, problem.detail)) continue;
+      return app.quit();
+    }
+    recentLog = [];
+    stopReason = undefined;
+    logStream?.end();
+    mkdirSync(app.getPath("logs"), { recursive: true });
+    logStream = createWriteStream(path.join(app.getPath("logs"), "servers.log"));
+    starting = true;
+    try {
+      const agentPort = await canListen(0);
+      if (!agentPort) throw new Error("No free local port for the agent server");
+      servers = await startLocalServers({ root: repoRoot, mode, uiPort, agentPort, nodePath, onOutput: log, onExit: (name, code, error) => void serverStopped(name, code, error) });
+      await servers.waitUntilReady();
+    } catch (error) {
+      await servers?.stop();
+      servers = undefined;
+      if (quitting) return;
+      const reason = stopReason ?? (error instanceof Error ? error.message : String(error));
+      if (await showStartupProblem("Beeblio could not start", `${reason}\n\n${recentLog.slice(-25).join("\n")}`)) continue;
+      return app.quit();
+    } finally {
+      starting = false;
+    }
+    for (const warning of servers.warnings) {
+      log("desktop", `${warning}\n`);
+      void dialog.showMessageBox({ type: "warning", message: "Some agent tools are unavailable", detail: warning });
+    }
+    for (const window of BrowserWindow.getAllWindows()) if (!isAppUrl(window.webContents.getURL())) void window.loadURL(`${uiOrigin}/workspace`);
+    if (!mainWindow) createMainWindow();
+    return;
+  }
+}
+
+async function serverStopped(name: LocalServerName, code: number | string | null, error?: Error) {
+  if (quitting || !servers) return;
+  const running = servers;
+  servers = undefined;
+  stopReason = `The ${serverLabels[name]} stopped: ${error?.message ?? `exit code ${code}`}`;
+  await running.stop();
+  // During startup, waitUntilReady fails next and startServers reports it.
+  if (starting) return;
+  const detail = `${stopReason}\n\n${recentLog.slice(-25).join("\n")}`;
+  if (await showStartupProblem(`Beeblio's ${serverLabels[name]} stopped unexpectedly`, detail)) {
+    for (const window of BrowserWindow.getAllWindows()) void window.loadFile(loadingPage);
+    return startServers();
+  }
+  app.quit();
+}
+
+type WindowState = Rectangle & { maximized?: boolean };
+
+function savedWindowState(): WindowState | undefined {
+  try {
+    const state = JSON.parse(readFileSync(windowStateFile(), "utf8")) as WindowState;
+    const visible = screen.getAllDisplays().some(({ workArea }) => state.x < workArea.x + workArea.width && state.x + state.width > workArea.x && state.y < workArea.y + workArea.height && state.y + state.height > workArea.y);
+    return visible ? state : undefined;
+  } catch { return undefined; }
+}
+
+function createMainWindow() {
+  const state = savedWindowState();
+  const window = new BrowserWindow({
+    ...(state ? { x: state.x, y: state.y, width: state.width, height: state.height } : { width: 1440, height: 900 }),
+    minWidth: 900,
+    minHeight: 600,
+    title: "Beeblio",
+    show: false,
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#0b1015" : "#f9f7f1",
+    webPreferences: secureWebPreferences(),
+  });
+  mainWindow = window;
+  if (state?.maximized) window.maximize();
+  window.once("ready-to-show", () => window.show());
+  window.on("close", () => {
+    try { writeFileSync(windowStateFile(), JSON.stringify({ ...window.getNormalBounds(), maximized: window.isMaximized() })); } catch { /* best effort */ }
+  });
+  window.on("closed", () => { if (mainWindow === window) mainWindow = undefined; });
+  if (servers) void window.loadURL(`${uiOrigin}/workspace`);
+  else void window.loadFile(loadingPage);
+}
+
+function buildMenu() {
+  const isMac = process.platform === "darwin";
+  const currentAppUrl = () => {
+    const url = BrowserWindow.getFocusedWindow()?.webContents.getURL();
+    return isAppUrl(url) ? url! : `${uiOrigin}/workspace`;
+  };
+  const template: MenuItemConstructorOptions[] = [
+    ...(isMac ? [{ role: "appMenu" } as const] : []),
+    {
+      label: "File",
+      submenu: [
+        { label: "Open in Browser", click: () => void shell.openExternal(currentAppUrl()) },
+        { label: "Open Data Folder", click: () => void shell.openPath(path.join(repoRoot, ".beeblio")) },
+        { label: "Open Logs", click: () => void shell.openPath(path.join(app.getPath("logs"), "servers.log")) },
+        { type: "separator" },
+        isMac ? { role: "close" } : { role: "quit" },
+      ],
+    },
+    { role: "editMenu" },
+    { role: "viewMenu" },
+    { role: "windowMenu" },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+function restrictWebContents() {
+  app.on("web-contents-created", (_event, contents) => {
+    contents.on("will-attach-webview", (event) => event.preventDefault());
+    contents.on("will-navigate", (event, url) => {
+      if (isAppUrl(url)) return;
+      event.preventDefault();
+      openExternally(url);
+    });
+    contents.setWindowOpenHandler(({ url }) => {
+      // Workspace files open in their own window; everything else goes to the default browser.
+      if (isAppUrl(url)) return { action: "allow", overrideBrowserWindowOptions: { width: 1100, height: 800, webPreferences: secureWebPreferences() } };
+      openExternally(url);
+      return { action: "deny" };
+    });
+  });
+  session.defaultSession.setPermissionRequestHandler((contents, _permission, callback, details) => callback(isAppUrl(details.requestingUrl || contents.getURL())));
+  ipcMain.handle("beeblio:select-folder", async (event) => {
+    if (!isAppUrl(event.senderFrame?.url)) throw new Error("Folder selection is only available to Beeblio");
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    const options = { title: "Choose a Beeblio project folder", properties: ["openDirectory", "createDirectory"] as Array<"openDirectory" | "createDirectory"> };
+    const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options);
+    return result.canceled ? null : result.filePaths[0] ?? null;
+  });
+}
+
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (!mainWindow) return createMainWindow();
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  });
+  app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
+  app.on("activate", () => { if (!mainWindow) createMainWindow(); });
+  app.on("before-quit", (event) => {
+    if (!servers) return;
+    event.preventDefault();
+    quitting = true;
+    const running = servers;
+    servers = undefined;
+    void running.stop().finally(() => { logStream?.end(); app.quit(); });
+  });
+  for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => app.quit());
+
+  // Not a top-level await: Electron does not emit "ready" until an ESM entry finishes evaluating.
+  void app.whenReady().then(() => {
+    restrictWebContents();
+    buildMenu();
+    createMainWindow();
+    return startServers();
+  });
+}

@@ -23,7 +23,7 @@ The project [session page](./app/%5BprojectId%5D/%5B%5B...sessionId%5D%5D/page.t
 - Bash and Python 3 for local agent commands and analysis
 - Optional: LibreOffice (`soffice`) for agent-assisted Office-to-PDF conversion; other command-line tools and Python packages for the workflows you want to run
 
-The folder picker uses macOS's native chooser. On other systems, enter an existing absolute folder path in the project form.
+In the browser, the folder picker uses macOS's native chooser; on other systems, enter an existing absolute folder path in the project form. The [desktop app](#desktop-app) has a native folder picker on every platform.
 
 ## Run locally
 
@@ -37,6 +37,21 @@ pnpm dev
 Open [http://127.0.0.1:3000](http://127.0.0.1:3000). The root URL redirects to `/workspace`. `pnpm dev` creates `.beeblio/` if needed, applies SQLite migrations, and starts both the Next.js UI and the Eve agent. They listen on `127.0.0.1:3000` and `127.0.0.1:2000` respectively.
 
 Choose **Link Project Folder** to select a folder. You can also paste its absolute path. Beeblio stores the resolved path in SQLite and works with the files in place. On linking, it adds any missing canonical files & folders: `1-References/`, `2-Data/`, `3-Analysis/`, and `4-Reports/` folders, plus `1-References/references.bib` and `3-Analysis/literature-matrix.matrix`. Existing files are preserved. Agent file tools display the folder as `/workspace`; agent shell commands run on your computer with that folder as the working directory. `$BEEBLIO_PROJECT_DIR` contains its absolute path.
+
+## Desktop app
+
+The desktop app runs the same local servers in their own window, so you don't need a browser tab. It runs from this checkout and has the same requirements as above, plus [Git for Windows](https://git-scm.com/download/win) on Windows: the agent runs shell commands with its Git Bash, and Python must be available as `python3` there.
+
+```bash
+pnpm install
+pnpm --dir desktop install
+pnpm build && pnpm build:eve
+pnpm desktop
+```
+
+`pnpm desktop` serves the production builds, so build again after you pull changes. `pnpm desktop:dev` runs the development servers with hot reload instead and needs no build. The first launch downloads Electron.
+
+The desktop app uses the same `.env.local` and `.beeblio/` data as `pnpm dev`, so it shows the same projects and conversations. Don't run both at once. The interface listens on `127.0.0.1:3210`; set `BEEBLIO_DESKTOP_PORT` to use another port. The agent uses any free local port. Server output is written to `servers.log` in the app's log folder (**File → Open Logs**). Links to other websites open in your default browser.
 
 ## Configuration
 
@@ -81,4 +96,5 @@ pnpm lint
 pnpm build
 pnpm build:eve
 pnpm db:migrate
+pnpm --dir desktop typecheck
 ```
