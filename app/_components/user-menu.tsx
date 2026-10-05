@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { ArrowUpRight, Globe, Moon, Settings, Sun, User } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ArrowUpRight, Globe, Moon, Settings, SlidersHorizontal, Sun, User } from "lucide-react";
 import { useTheme } from "next-themes";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ProjectSettingsDialog } from "@/app/[projectId]/_components/project-settings-dialog";
+import { AppSettingsDialog } from "./app-settings-dialog";
 import type { ProjectSettings } from "@/lib/project-settings";
 
 /**
@@ -38,6 +39,10 @@ export function UserMenu({
 }) {
   const { setTheme, theme } = useTheme();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [appSettingsOpen, setAppSettingsOpen] = useState(false);
+
+  // The desktop app's Settings… menu item opens the same dialog.
+  useEffect(() => window.beeblioDesktop?.onOpenSettings(() => setAppSettingsOpen(true)), []);
 
   const user = initialUser;
   if (!user) return null;
@@ -68,10 +73,17 @@ export function UserMenu({
               className="cursor-pointer"
               onSelect={() => setSettingsOpen(true)}
             >
-              <Settings className="h-4 w-4" />
+              <SlidersHorizontal className="h-4 w-4" />
               <span>Project Settings</span>
             </DropdownMenuItem>
           ) : null}
+          <DropdownMenuItem
+            className="cursor-pointer"
+            onSelect={() => setAppSettingsOpen(true)}
+          >
+            <Settings className="h-4 w-4" />
+            <span>Settings</span>
+          </DropdownMenuItem>
           <div className="flex min-h-10 items-center gap-2 px-2.5 py-1.5" role="group" aria-label="Theme">
             <span className="flex min-w-0 flex-1 items-center gap-2 text-sm">
               <ThemeIcon className="size-4 text-muted-foreground" />
@@ -109,6 +121,7 @@ export function UserMenu({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      <AppSettingsDialog open={appSettingsOpen} onOpenChange={setAppSettingsOpen} />
       {projectId ? (
         <ProjectSettingsDialog
           projectId={projectId}

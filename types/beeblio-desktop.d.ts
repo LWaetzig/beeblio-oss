@@ -3,6 +3,8 @@ interface BeeblioDesktopBridge {
   platform: string;
   /** Opens the native folder picker; resolves null when the person cancels. */
   selectFolder(): Promise<string | null>;
+  /** Runs the callback when Settings… is chosen in the app menu; returns an unsubscribe function. */
+  onOpenSettings(callback: () => void): () => void;
 }
 
 interface Window {

@@ -184,11 +184,32 @@ function buildMenu() {
     const url = BrowserWindow.getFocusedWindow()?.webContents.getURL();
     return isAppUrl(url) ? url! : `${uiOrigin}/workspace`;
   };
+  const openSettings = () => {
+    const window = [BrowserWindow.getFocusedWindow(), mainWindow].find((candidate) => candidate && isAppUrl(candidate.webContents.getURL()));
+    window?.webContents.send("beeblio:open-settings");
+  };
+  const settingsItem: MenuItemConstructorOptions = { label: "Settings…", accelerator: "CmdOrCtrl+,", click: openSettings };
   const template: MenuItemConstructorOptions[] = [
-    ...(isMac ? [{ role: "appMenu" } as const] : []),
+    ...(isMac ? [{
+      label: app.name,
+      submenu: [
+        { role: "about" },
+        { type: "separator" },
+        settingsItem,
+        { type: "separator" },
+        { role: "services" },
+        { type: "separator" },
+        { role: "hide" },
+        { role: "hideOthers" },
+        { role: "unhide" },
+        { type: "separator" },
+        { role: "quit" },
+      ],
+    } satisfies MenuItemConstructorOptions] : []),
     {
       label: "File",
       submenu: [
+        ...(isMac ? [] : [settingsItem, { type: "separator" } as const]),
         { label: "Open in Browser", click: () => void shell.openExternal(currentAppUrl()) },
         { label: "Open Data Folder", click: () => void shell.openPath(path.join(repoRoot, ".beeblio")) },
         { label: "Open Logs", click: () => void shell.openPath(path.join(app.getPath("logs"), "servers.log")) },

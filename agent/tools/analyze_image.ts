@@ -4,6 +4,7 @@ import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { readWorkspaceFile } from "../workspace-files";
 import { timedModelFetch } from "../lib/model-timeout";
+import { openRouterApiKey } from "../../lib/local-credentials";
 import {
   resolveAuthenticatedWorkspace,
   toWorkspaceRelativePath,
@@ -77,7 +78,7 @@ export default defineTool({
     }
 
     const openrouter = createOpenRouter({
-      apiKey: process.env.OPENROUTER_API_KEY,
+      apiKey: openRouterApiKey(),
       fetch: timedModelFetch(),
     });
     const result = await generateText({

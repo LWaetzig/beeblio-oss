@@ -55,7 +55,7 @@ The desktop app uses the same `.env.local` and `.beeblio/` data as `pnpm dev`, s
 
 ## Configuration
 
-The main agent needs `OPENROUTER_API_KEY`, `OPENROUTER_MODEL_ID`, and `OPENROUTER_MODEL_CONTEXT_WINDOW_TOKENS`. Set the context window to the token limit of the OpenRouter model you selected. Copy [`.env.example`](./.env.example) for all settings:
+The main agent needs `OPENROUTER_API_KEY`, `OPENROUTER_MODEL_ID`, and `OPENROUTER_MODEL_CONTEXT_WINDOW_TOKENS`. Set the context window to the token limit of the OpenRouter model you selected. You can also enter the OpenRouter key in the app under **Settings → API Keys** (account menu, or **Settings…** in the desktop app's menu). Beeblio checks the key with OpenRouter, stores it in `.beeblio/credentials.json`, and uses it right away instead of the `.env.local` value; remove it there to fall back to `.env.local`. Copy [`.env.example`](./.env.example) for all settings:
 
 | Setting | Used for |
 | --- | --- |
@@ -76,6 +76,7 @@ The application has one local user and no browser login or accounts checks. Keep
 - **Project files:** Your linked folders. Browser uploads, downloads, and agent file operations use local filesystem routes.
 - **Application data:** `.beeblio/beeblio.sqlite` stores projects, conversation state, knowledge metadata, and share records. Schema migrations are in [`drizzle/`](./drizzle/).
 - **Internal secret:** `.beeblio/agent-secret` is generated automatically for the local UI-to-agent connection.
+- **API keys from Settings:** `.beeblio/credentials.json`, readable only by your user account.
 - **Agent compute:** Eve runs Bash and Python on the host. No Docker image or separate database server is required. The bundled `beeblio_research` Python helper is available to agent commands; other Python packages come from your local environment.
 
 Beeblio still calls external model and research APIs when those features are used. Back up both your project folders and `.beeblio/` if you need to preserve files and conversation history.
