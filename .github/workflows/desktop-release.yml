@@ -1,0 +1,111 @@
+# Builds the desktop installers. Pushing a tag such as v0.1.0 also creates a
+# draft GitHub Release with them; a manual run or a pull request that touches
+# packaging only uploads them as workflow artifacts, so packaging breaks are
+# caught before a release. Each platform builds on its own runner because the
+# bundled Node.js binary and native modules (better-sqlite3, sharp) are
+# platform-specific.
+name: Desktop release
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - "desktop/**"
+      - "scripts/local-servers.mjs"
+      - "scripts/migrate.mjs"
+      - "next.config.ts"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/desktop-release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macOS (Apple Silicon), runner: macos-15 }
+          - { name: macOS (Intel), runner: macos-15-intel }
+          - { name: Windows, runner: windows-latest }
+    env:
+      # next.config.ts: build the UI as a self-contained server.
+      BEEBLIO_STANDALONE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.17.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            desktop/pnpm-lock.yaml
+      # Flat node_modules: pnpm's links do not survive packaging (see desktop/scripts/stage.mjs).
+      - run: pnpm install --frozen-lockfile --config.node-linker=hoisted
+      - run: pnpm test
+      - run: pnpm build
+      - run: pnpm build:eve
+      - run: pnpm install --frozen-lockfile
+        working-directory: desktop
+      - run: pnpm dist
+        working-directory: desktop
+        env:
+          # All optional. Without them the macOS build is ad-hoc signed and
+          # the Windows installer is unsigned; see the README's "Signing".
+          # Each certificate goes only to its own OS: on Windows, electron-builder
+          # falls back from WIN_CSC_LINK to CSC_LINK.
+          CSC_LINK: ${{ runner.os == 'macOS' && secrets.MAC_CERTIFICATE || '' }}
+          CSC_KEY_PASSWORD: ${{ runner.os == 'macOS' && secrets.MAC_CERTIFICATE_PASSWORD || '' }}
+          WIN_CSC_LINK: ${{ runner.os == 'Windows' && secrets.WINDOWS_CERTIFICATE || '' }}
+          WIN_CSC_KEY_PASSWORD: ${{ runner.os == 'Windows' && secrets.WINDOWS_CERTIFICATE_PASSWORD || '' }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Stops electron-builder looking for a certificate in the keychain when none was given.
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: beeblio-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            desktop/release/*.dmg
+            desktop/release/*.exe
+          if-no-files-found: error
+
+  release:
+    name: Draft release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      # A tag that disagrees with the app's version would ship installers named for another version.
+      - name: Check the tag matches desktop/package.json
+        run: |
+          version="$(node -p "require('./desktop/package.json').version")"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match desktop/package.json version $version"
+            exit 1
+          fi
+      - uses: actions/download-artifact@v4
+        with:
+          path: installers
+          merge-multiple: true
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" installers/* --draft --verify-tag --generate-notes --title "Beeblio ${GITHUB_REF_NAME#v}"

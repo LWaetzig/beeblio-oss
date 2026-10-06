@@ -14,7 +14,7 @@ pnpm build
 pnpm build:eve
 ```
 
-If you change the desktop app or the local server launcher (`scripts/local-servers.mjs`), also run `pnpm --dir desktop install` and `pnpm --dir desktop typecheck`, and check that both `pnpm dev` and `pnpm desktop` still start.
+If you change the desktop app or the local server launcher (`scripts/local-servers.mjs`), also run `pnpm --dir desktop install` and `pnpm --dir desktop typecheck`, and check that both `pnpm dev` and `pnpm desktop` still start. If your change affects the installed app (its servers, paths, or packaging), build an installer as described in the README's "Build the installers" and check that it starts with a fresh profile, opens Settings on first run, and leaves no server processes after you quit. The [Desktop release](.github/workflows/desktop-release.yml) workflow can also be run by hand from the Actions tab to build all installers.
 
 Do not commit `.env.local`, `.beeblio/`, linked project files, generated builds, or API credentials. Update the README and `.env.example` when changing setup or configuration. Explain behavior changes and how you checked them in pull requests.
 

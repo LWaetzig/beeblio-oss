@@ -39,7 +39,29 @@ Choose **Link Project Folder** to select a folder. You can also paste its absolu
 
 ## Desktop app
 
-The desktop app runs the same local servers in their own window, so you don't need a browser tab. It runs from this checkout and has the same requirements as above, plus [Git for Windows](https://git-scm.com/download/win) on Windows: the agent runs shell commands with its Git Bash, and Python must be available as `python3` there.
+Beeblio also runs as a desktop app for macOS and Windows, in its own window. It includes everything it needs to run, so you don't need Node.js or a checkout.
+
+### Install
+
+Download the installer for your computer from the project's [Releases](https://github.com/alharkan7/beeblio-oss/releases): `…-mac-arm64.dmg` for Apple Silicon Macs, `…-mac-x64.dmg` for Intel Macs, or `…-win-x64.exe` for Windows. On first launch, Beeblio opens **Settings**. Add your OpenRouter API key and choose a main model, and you can start chatting.
+
+The installers are not signed with a developer certificate yet, so your system warns you the first time you open the app:
+
+- **macOS:** Open the app once and dismiss the warning, then open **System Settings → Privacy & Security** and choose **Open Anyway** next to Beeblio. If macOS says the app "is damaged", run `xattr -dr com.apple.quarantine /Applications/Beeblio.app` in Terminal, then open it again.
+- **Windows:** On the "Windows protected your PC" screen, choose **More info → Run anyway**. Beeblio installs for your user account only and needs no administrator rights.
+
+The agent runs commands with tools on your computer:
+
+- **macOS:** Beeblio reads your shell's `PATH`, so tools you installed with Homebrew are found.
+- **Windows:** Install [Git for Windows](https://git-scm.com/download/win); the agent runs shell commands with its Git Bash.
+
+For Python analysis, install Python 3 (as `python3`). Install [Pandoc](https://pandoc.org) for LaTeX and Word export, and [LibreOffice](https://www.libreoffice.org) to check Office files.
+
+Beeblio keeps its data in your user folder, outside the app: `~/Library/Application Support/Beeblio/Data` on macOS and `%APPDATA%\Beeblio\Data` on Windows. **File → Open Data Folder** opens it, and uninstalling leaves it in place. The interface listens on `127.0.0.1:3210`. Server output is written to `servers.log` (**File → Open Logs**).
+
+### Run from a checkout
+
+To work on the desktop app, run it from this checkout. It needs the same requirements as above.
 
 ```bash
 pnpm install
@@ -48,9 +70,28 @@ pnpm build && pnpm build:eve
 pnpm desktop
 ```
 
-`pnpm desktop` serves the production builds, so build again after you pull changes. `pnpm desktop:dev` runs the development servers with hot reload instead and needs no build. The first launch downloads Electron.
+`pnpm desktop` serves the production builds, so build again after you pull changes. `pnpm desktop:dev` runs the development servers with hot reload instead and needs no build. The first launch downloads Electron. Run this way, the app uses the same `.env.local` and `.beeblio/` data as `pnpm dev`, so it shows the same projects and conversations. Don't run both at once. Set `BEEBLIO_DESKTOP_PORT` to use a port other than 3210.
 
-The desktop app uses the same `.env.local` and `.beeblio/` data as `pnpm dev`, so it shows the same projects and conversations. Don't run both at once. The interface listens on `127.0.0.1:3210`; set `BEEBLIO_DESKTOP_PORT` to use another port. The agent uses any free local port. Server output is written to `servers.log` in the app's log folder (**File → Open Logs**). Links to other websites open in your default browser.
+### Build the installers
+
+Installers are built on the platform they are for: a Mac builds the `.dmg`, Windows the `.exe`. The UI must come from a flat install, because pnpm's linked `node_modules` cannot be packaged:
+
+```bash
+pnpm install --frozen-lockfile --config.node-linker=hoisted
+BEEBLIO_STANDALONE=1 pnpm build   # PowerShell: $env:BEEBLIO_STANDALONE=1; pnpm build
+pnpm build:eve
+pnpm --dir desktop install
+pnpm --dir desktop dist
+```
+
+The installer is written to `desktop/release/`. Run `pnpm install` again afterwards to return to the usual layout. On Linux, `pnpm --dir desktop dist` builds an unpacked app in `desktop/release/linux-unpacked` for testing; it is not released.
+
+**Releases:** set the new version in `desktop/package.json` and push a tag such as `v0.2.0`. The [Desktop release](.github/workflows/desktop-release.yml) workflow builds all three installers and attaches them to a draft GitHub Release, which you review and publish. Run the workflow by hand to build the installers without making a release.
+
+**Signing:** the workflow signs builds once these repository secrets exist, and works without them:
+
+- macOS: `MAC_CERTIFICATE` (base64 `.p12` Developer ID Application certificate) and `MAC_CERTIFICATE_PASSWORD`. Add `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID` to notarize.
+- Windows: `WINDOWS_CERTIFICATE` and `WINDOWS_CERTIFICATE_PASSWORD`.
 
 ## Configuration
 
