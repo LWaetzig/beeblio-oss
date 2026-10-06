@@ -5,6 +5,7 @@ import { Readable } from "node:stream";
 import { defineSandbox, type SandboxBackend, type SandboxSession, type SandboxProcess, type SandboxRunOptions } from "eve/sandbox";
 import { getWorkspaceIdentity } from "../workspace-paths";
 import { projectFolder } from "../../lib/workspace-files";
+import { appRoot } from "../../lib/app-paths";
 
 type SessionOptions = { folder: string };
 const processes = new Map<string, Set<ReturnType<typeof spawn>>>();
@@ -31,9 +32,9 @@ function makeSession(sessionKey: string, state: { folder?: string }): SandboxSes
         ...process.env,
         ...options.env,
         BEEBLIO_PROJECT_DIR: root,
-        BEEBLIO_SKILLS_DIR: path.resolve("agent/skills"),
-        NODE_PATH: [path.resolve("node_modules"), process.env.NODE_PATH].filter(Boolean).join(path.delimiter),
-        PYTHONPATH: [path.resolve("agent/sandbox"), process.env.PYTHONPATH].filter(Boolean).join(path.delimiter),
+        BEEBLIO_SKILLS_DIR: path.join(appRoot(), "agent", "skills"),
+        NODE_PATH: [path.join(appRoot(), "node_modules"), process.env.NODE_PATH].filter(Boolean).join(path.delimiter),
+        PYTHONPATH: [path.join(appRoot(), "agent", "sandbox"), process.env.PYTHONPATH].filter(Boolean).join(path.delimiter),
       },
       stdio: ["ignore", "pipe", "pipe"],
       signal: options.abortSignal,

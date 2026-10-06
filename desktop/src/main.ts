@@ -16,7 +16,7 @@ const nodePath = process.env.npm_node_execpath || "node";
 const uiPort = Number(process.env.BEEBLIO_DESKTOP_PORT || 3210);
 const uiOrigin = `http://127.0.0.1:${uiPort}`;
 const windowStateFile = () => path.join(app.getPath("userData"), "window-state.json");
-const serverLabels: Record<LocalServerName, string> = { "drizzle-kit": "database migration", next: "interface server", eve: "agent server" };
+const serverLabels: Record<LocalServerName, string> = { migrate: "database migration", next: "interface server", eve: "agent server" };
 /** Page loads retried while a restarted server comes back, before asking the person. */
 const MAX_LOAD_RETRIES = 5;
 

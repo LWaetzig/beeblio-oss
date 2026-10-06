@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
+import { dataDir } from "./app-paths";
+
 /**
  * API keys entered in Settings. Like the agent secret, they live in .beeblio/
  * so both local server processes read the same values, and they take
@@ -12,7 +14,7 @@ type Credentials = { openRouterApiKey?: string };
 export type ApiKeyStatus = { source: "settings" | "env" | null; last4?: string };
 
 /** Resolved per call because tests and the servers choose the working directory. */
-const credentialsFile = () => path.resolve(process.cwd(), ".beeblio/credentials.json");
+const credentialsFile = () => path.join(dataDir(), "credentials.json");
 
 /** Windows reports these while antivirus or an indexer briefly holds the target open. */
 const TRANSIENT_RENAME_ERRORS = new Set(["EPERM", "EACCES", "EBUSY"]);

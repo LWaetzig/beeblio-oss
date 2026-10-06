@@ -13,13 +13,32 @@ const IS_WINDOWS = process.platform === "win32";
 /**
  * Applies SQLite migrations, then starts the Next.js UI and the Eve agent.
  * Shared by `pnpm dev` and the desktop app so both launch the same way.
+ *
+ * `layout: "checkout"` runs from a source checkout through the next and eve
+ * CLIs and reads .env.local. `layout: "bundle"` runs the prebuilt servers the
+ * installed desktop app ships (see desktop/scripts/stage.mjs), which has no
+ * CLIs and no .env.local; its configuration lives in Settings.
  */
-export async function startLocalServers({ root, mode = "dev", uiPort = 3000, agentPort = 2000, nodePath = process.execPath, onOutput, onExit }) {
-  const env = { ...process.env };
-  dotenv.config({ path: path.join(root, ".env.local"), processEnv: env, quiet: true });
-  dotenv.config({ path: path.join(root, ".env"), processEnv: env, quiet: true });
-  const dataDir = path.join(root, ".beeblio");
+export async function startLocalServers({
+  root,
+  layout = "checkout",
+  mode = "dev",
+  uiPort = 3000,
+  agentPort = 2000,
+  nodePath = process.execPath,
+  dataDir = path.join(root, ".beeblio"),
+  extraEnv = {},
+  onOutput,
+  onExit,
+}) {
+  const env = { ...process.env, ...extraEnv };
+  if (layout === "checkout") {
+    dotenv.config({ path: path.join(root, ".env.local"), processEnv: env, quiet: true });
+    dotenv.config({ path: path.join(root, ".env"), processEnv: env, quiet: true });
+  }
   mkdirSync(dataDir, { recursive: true });
+  env.BEEBLIO_DATA_DIR = dataDir;
+  env.BEEBLIO_APP_ROOT = layout === "bundle" ? path.join(root, "app") : root;
   env.LOCAL_DB_PATH ||= path.join(dataDir, "beeblio.sqlite");
   env.AGENT_URL = `http://${HOST}:${agentPort}`;
 
@@ -30,26 +49,28 @@ export async function startLocalServers({ root, mode = "dev", uiPort = 3000, age
     else warnings.push("Git Bash was not found, so agent shell commands will fail. Install Git for Windows or set BEEBLIO_BASH to bash.exe.");
   }
 
-  // Run each CLI's JavaScript entry with Node directly: the node_modules/.bin
-  // shims are .cmd files on Windows, which spawn cannot start without a shell.
+  // Resolved before anything starts so a missing install fails with a fix, not mid-launch.
+  const commands = serverCommands({ root, layout, mode, uiPort, agentPort, dataDir, databasePath: env.LOCAL_DB_PATH });
+
   // On macOS and Linux each long-running server leads its own process group, so
   // stopping it also reaches its workers and the agent's shell commands (see
   // terminate). The short migration stays in our group so Ctrl+C still stops it.
-  function start(name, args, { ownProcessGroup = false } = {}) {
-    const child = spawn(nodePath, [binEntry(root, name), ...args], { cwd: root, env, detached: ownProcessGroup && !IS_WINDOWS, stdio: onOutput ? ["ignore", "pipe", "pipe"] : "inherit", windowsHide: true });
+  function start(name, { ownProcessGroup = false } = {}) {
+    const { args, cwd, env: serverEnv } = commands[name];
+    const child = spawn(nodePath, args, { cwd, env: { ...env, ...serverEnv }, detached: ownProcessGroup && !IS_WINDOWS, stdio: onOutput ? ["ignore", "pipe", "pipe"] : "inherit", windowsHide: true });
     if (onOutput) for (const stream of [child.stdout, child.stderr]) stream.on("data", (chunk) => onOutput(name, chunk));
     return child;
   }
 
   await new Promise((resolve, reject) => {
-    const child = start("drizzle-kit", ["migrate"]);
+    const child = start("migrate");
     child.once("error", reject);
-    child.once("close", (code) => code === 0 ? resolve() : reject(new Error(`drizzle-kit exited with ${code}`)));
+    child.once("close", (code) => code === 0 ? resolve() : reject(new Error(`The database migration exited with ${code}`)));
   });
 
   const children = new Map([
-    ["next", start("next", [mode, "--hostname", HOST, "--port", String(uiPort)], { ownProcessGroup: true })],
-    ["eve", start("eve", mode === "dev" ? ["dev", "--no-ui", "--host", HOST, "--port", String(agentPort)] : ["start", "--host", HOST, "--port", String(agentPort)], { ownProcessGroup: true })],
+    ["next", start("next", { ownProcessGroup: true })],
+    ["eve", start("eve", { ownProcessGroup: true })],
   ]);
 
   let stopping;
@@ -85,6 +106,31 @@ export function missingProductionBuilds(root) {
   if (!existsSync(path.join(root, ".next", "BUILD_ID"))) missing.push("pnpm build");
   if (!existsSync(path.join(root, ".output", "server", "index.mjs"))) missing.push("pnpm build:eve");
   return missing;
+}
+
+/**
+ * How to start each process in a layout. The checkout runs each CLI's
+ * JavaScript entry with Node directly: the node_modules/.bin shims are .cmd
+ * files on Windows, which spawn cannot start without a shell. The bundle runs
+ * the servers' own entry points; Eve then needs its working directory in the
+ * data folder, because it keeps workflow state in .eve/ under it.
+ */
+function serverCommands({ root, layout, mode, uiPort, agentPort, dataDir, databasePath }) {
+  if (layout === "bundle") {
+    return {
+      migrate: { args: [path.join(root, "ui", "migrate.mjs"), databasePath, path.join(root, "drizzle")], cwd: dataDir },
+      next: { args: [path.join(root, "ui", "server.js")], cwd: dataDir, env: { PORT: String(uiPort), HOSTNAME: HOST, NODE_ENV: "production" } },
+      eve: { args: [path.join(root, "agent", "server", "index.mjs")], cwd: dataDir, env: { PORT: String(agentPort), HOST, NODE_ENV: "production" } },
+    };
+  }
+  if (layout !== "checkout") throw new Error(`Unknown server layout "${layout}"`);
+  const next = binEntry(root, "next");
+  const eve = binEntry(root, "eve");
+  return {
+    migrate: { args: [path.join(root, "scripts", "migrate.mjs"), databasePath, path.join(root, "drizzle")], cwd: root },
+    next: { args: [next, mode, "--hostname", HOST, "--port", String(uiPort)], cwd: root },
+    eve: { args: [eve, ...(mode === "dev" ? ["dev", "--no-ui"] : ["start"]), "--host", HOST, "--port", String(agentPort)], cwd: root },
+  };
 }
 
 /** Resolves a CLI's JavaScript entry; fails with a fix, not an ENOENT, when dependencies are missing. */

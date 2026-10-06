@@ -1,12 +1,37 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { once } from "node:events";
+import { realpath } from "node:fs/promises";
 import { describe, test } from "node:test";
 
 import { startLocalServers, terminate } from "../scripts/local-servers.mjs";
+
+/** Frees a port for the test servers by letting the OS pick one. */
+async function freePort() {
+  const { createServer } = await import("node:net");
+  const server = createServer().listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const { port } = server.address();
+  await new Promise((resolve) => server.close(resolve));
+  return port;
+}
+
+/**
+ * A stand-in for the desktop app's staged servers: each script records the
+ * working directory and environment it was given, and the UI answers the
+ * health check the launcher waits for.
+ */
+function writeFakeBundle(root, reportDir) {
+  const report = (name) => `process.getBuiltinModule("node:fs").writeFileSync(${JSON.stringify(path.join(reportDir, `${name}.json`))}, JSON.stringify({ cwd: process.cwd(), argv: process.argv.slice(2), env: process.env }));`;
+  const serve = (name, body) => `${report(name)}\nprocess.getBuiltinModule("node:http").createServer((req, res) => res.end(${JSON.stringify(body)})).listen(Number(process.env.PORT), process.env.HOSTNAME || process.env.HOST);`;
+  for (const dir of ["ui", "agent/server", "drizzle"]) mkdirSync(path.join(root, dir), { recursive: true });
+  writeFileSync(path.join(root, "ui", "migrate.mjs"), report("migrate"));
+  writeFileSync(path.join(root, "ui", "server.js"), serve("next", "ok"));
+  writeFileSync(path.join(root, "agent", "server", "index.mjs"), serve("eve", "ok"));
+}
 
 const posixOnly = process.platform === "win32" && "process groups are POSIX-only; Windows uses taskkill /T";
 
@@ -87,6 +112,34 @@ describe("terminate", () => {
 });
 
 describe("startLocalServers", () => {
+  test("runs the desktop app's staged servers with their state in the data folder", async (t) => {
+    const root = mkdtempSync(path.join(tmpdir(), "beeblio-bundle-"));
+    const dataDir = path.join(root, "user-data");
+    const reports = path.join(root, "reports");
+    mkdirSync(reports);
+    writeFakeBundle(root, reports);
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    const [uiPort, agentPort] = [await freePort(), await freePort()];
+
+    const servers = await startLocalServers({ root, layout: "bundle", uiPort, agentPort, dataDir, extraEnv: { BEEBLIO_TEST: "1" }, onOutput: () => {} });
+    t.after(() => servers.stop());
+    await servers.waitUntilReady({ timeoutMs: 15_000 });
+
+    const read = (name) => JSON.parse(readFileSync(path.join(reports, `${name}.json`), "utf8"));
+    const [migrate, ui, agent] = [read("migrate"), read("next"), read("eve")];
+    assert.deepEqual(migrate.argv, [path.join(dataDir, "beeblio.sqlite"), path.join(root, "drizzle")]);
+    // Eve keeps workflow state under its working directory, which must be writable.
+    assert.equal(agent.cwd, await realpath(dataDir));
+    for (const server of [ui, agent]) {
+      assert.equal(server.env.BEEBLIO_DATA_DIR, dataDir);
+      assert.equal(server.env.BEEBLIO_APP_ROOT, path.join(root, "app"));
+      assert.equal(server.env.AGENT_URL, `http://127.0.0.1:${agentPort}`);
+      assert.equal(server.env.BEEBLIO_TEST, "1");
+    }
+    assert.equal(ui.env.PORT, String(uiPort));
+    assert.equal(agent.env.PORT, String(agentPort));
+  });
+
   test("explains how to fix a checkout without installed dependencies", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "beeblio-empty-checkout-"));
     try {
