@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, screen, session, shell, type MenuItemConstructorOptions, type Rectangle, type WebPreferences } from "electron";
 import { missingProductionBuilds, startLocalServers, type LocalServerName, type LocalServers } from "../../scripts/local-servers.mjs";
+import { registerScreenCapture } from "./screen-capture";
 import { loginShellPath } from "./shell-path";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -328,6 +329,7 @@ function restrictWebContents() {
     });
   });
   session.defaultSession.setPermissionRequestHandler((contents, _permission, callback, details) => callback(isAppUrl(details.requestingUrl || contents.getURL())));
+  registerScreenCapture({ isAppUrl, pickerPage: path.join(here, "../static/screen-picker.html"), pickerPreload: path.join(here, "picker-preload.cjs") });
   ipcMain.handle("beeblio:select-folder", async (event) => {
     if (!isAppUrl(event.senderFrame?.url)) throw new Error("Folder selection is only available to Beeblio");
     const owner = BrowserWindow.fromWebContents(event.sender);

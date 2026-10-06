@@ -24,6 +24,6 @@ await Promise.all([
     // module does not have; give them one.
     banner: { js: 'import { createRequire as __createRequire } from "node:module"; const require = __createRequire(import.meta.url);' },
   }),
-  // Preload scripts in a sandboxed renderer must be a single CommonJS file.
-  build({ ...shared, entryPoints: [path.join(desktop, "src", "preload.cts")], outfile: path.join(dist, "preload.cjs"), format: "cjs" }),
+  // Preload scripts in a sandboxed renderer must be single CommonJS files.
+  ...["preload", "picker-preload"].map((name) => build({ ...shared, entryPoints: [path.join(desktop, "src", `${name}.cts`)], outfile: path.join(dist, `${name}.cjs`), format: "cjs" })),
 ]);
