@@ -1,14 +1,23 @@
-export type LocalServerName = "drizzle-kit" | "next" | "eve";
+export type LocalServerName = "migrate" | "next" | "eve";
 
 export interface LocalServerOptions {
-  /** Repository root that holds node_modules, .env.local, and .beeblio/. */
+  /** A source checkout, or the folder the desktop app's servers were staged into. */
   root: string;
-  /** `dev` runs the hot-reloading servers; `start` serves the production builds. */
+  /**
+   * `checkout` (default) runs the next and eve CLIs and reads .env.local from
+   * `root`; `bundle` runs the prebuilt servers laid out by desktop/scripts/stage.mjs.
+   */
+  layout?: "checkout" | "bundle";
+  /** Checkout only: `dev` runs the hot-reloading servers; `start` serves the production builds. */
   mode?: "dev" | "start";
   uiPort?: number;
   agentPort?: number;
   /** Node.js 24 executable that runs the servers. Defaults to the current process. */
   nodePath?: string;
+  /** Writable folder for the database, settings, and workspaces. Defaults to `<root>/.beeblio`. */
+  dataDir?: string;
+  /** Variables added to the servers' environment, after the inherited ones. */
+  extraEnv?: Record<string, string>;
   /** Receives server output; without it, output goes to this process's stdio. */
   onOutput?: (name: LocalServerName, chunk: Buffer) => void;
   /** Called when a server exits or fails to spawn before `stop()` was called. */
