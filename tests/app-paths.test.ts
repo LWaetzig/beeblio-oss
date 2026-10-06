@@ -25,6 +25,7 @@ describe("app paths", () => {
     process.env.BEEBLIO_DATA_DIR = "relative/data ";
     process.env.BEEBLIO_APP_ROOT = path.join(path.sep, "opt", "beeblio", "app");
     assert.equal(dataDir(), path.resolve("relative/data"));
-    assert.equal(appRoot(), path.join(path.sep, "opt", "beeblio", "app"));
+    // path.resolve, not join: on Windows an absolute path without a drive gets the current one.
+    assert.equal(appRoot(), path.resolve(path.sep, "opt", "beeblio", "app"));
   });
 });

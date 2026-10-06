@@ -1,10 +1,9 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { once } from "node:events";
-import { realpath } from "node:fs/promises";
 import { describe, test } from "node:test";
 import { pathToFileURL } from "node:url";
 
@@ -150,18 +149,23 @@ describe("startLocalServers", () => {
     const reports = path.join(root, "reports");
     mkdirSync(reports);
     writeFakeBundle(root, reports);
-    t.after(() => rmSync(root, { recursive: true, force: true }));
     const [uiPort, agentPort] = [await freePort(), await freePort()];
 
     const servers = await startLocalServers({ root, layout: "bundle", uiPort, agentPort, dataDir, extraEnv: { BEEBLIO_TEST: "1" }, onOutput: () => {} });
-    t.after(() => servers.stop());
+    // One hook, in this order: Windows cannot delete a folder that running servers
+    // use as their working directory, and a throwing hook would skip the stop.
+    t.after(async () => {
+      await servers.stop();
+      rmSync(root, { recursive: true, force: true });
+    });
     await servers.waitUntilReady({ timeoutMs: 15_000 });
 
     const read = (name) => JSON.parse(readFileSync(path.join(reports, `${name}.json`), "utf8"));
     const [migrate, ui, agent] = [read("migrate"), read("next"), read("eve")];
     assert.deepEqual(migrate.argv, [path.join(dataDir, "beeblio.sqlite"), path.join(root, "drizzle")]);
     // Eve keeps workflow state under its working directory, which must be writable.
-    assert.equal(agent.cwd, await realpath(dataDir));
+    // .native expands Windows 8.3 short names (C:\\Users\\RUNNER~1), which a server's cwd may use.
+    assert.equal(realpathSync.native(agent.cwd), realpathSync.native(dataDir));
     for (const server of [ui, agent]) {
       assert.equal(server.env.BEEBLIO_DATA_DIR, dataDir);
       assert.equal(server.env.BEEBLIO_APP_ROOT, path.join(root, "app"));
