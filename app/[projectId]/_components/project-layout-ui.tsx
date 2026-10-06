@@ -120,6 +120,7 @@ import {
   type WorkspaceSelectionProvider,
   type WorkspaceUnsavedFile,
 } from "./workspace-context";
+import { errorDetail } from "@/lib/error-detail";
 
 interface ProjectLayoutUIProps {
   projectId: string;
@@ -667,7 +668,7 @@ export function ProjectLayoutUI({
       toast.success(`${result.file.name} saved`);
       closeSaveAsDialog(true);
     } catch (error) {
-      setSaveAsError(error instanceof Error ? error.message : "Failed to save");
+      setSaveAsError(errorDetail(error, "Failed to save"));
       setSaveAsSaving(false);
     }
   };
@@ -732,7 +733,7 @@ export function ProjectLayoutUI({
       setNewArtifactName("");
       openFile(file);
     } catch (error) {
-      setNewArtifactError(error instanceof Error ? error.message : "Could not create the file.");
+      setNewArtifactError(errorDetail(error, "Could not create the file."));
     } finally {
       setNewArtifactPending(false);
     }
@@ -764,7 +765,7 @@ export function ProjectLayoutUI({
       setNewCustomName("");
       openFile(result.file);
     } catch (error) {
-      setNewCustomError(error instanceof Error ? error.message : "Could not create the file.");
+      setNewCustomError(errorDetail(error, "Could not create the file."));
     } finally {
       setNewCustomPending(false);
     }

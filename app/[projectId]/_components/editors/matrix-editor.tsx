@@ -87,6 +87,7 @@ import { LiteratureMap } from "./literature-map/literature-map";
 import { SourceCodeEditor } from "./source-code-editor";
 import { type WorkspaceEditorProps } from "./types";
 import { useTextFile } from "./use-text-file";
+import { errorDetail } from "@/lib/error-detail";
 
 type MatrixMode = "table" | "map" | "source";
 type SortState = { key: string; direction: "asc" | "desc" };
@@ -112,7 +113,7 @@ export function MatrixEditor({ projectId, file, sourceUrl, onSaved }: WorkspaceE
     try {
       return { ok: true as const, matrix: parseMatrix(text.draft) };
     } catch (error) {
-      return { ok: false as const, message: error instanceof Error ? error.message : "The matrix file could not be parsed." };
+      return { ok: false as const, message: errorDetail(error, "The matrix file could not be parsed.") };
     }
   }, [text.draft, text.error, text.loading]);
 
@@ -336,7 +337,7 @@ export function MatrixEditor({ projectId, file, sourceUrl, onSaved }: WorkspaceE
       return true;
     } catch (error) {
       toast.error("Could not add the column", {
-        description: error instanceof Error ? error.message : undefined,
+        description: errorDetail(error),
       });
       return false;
     }
@@ -363,7 +364,7 @@ export function MatrixEditor({ projectId, file, sourceUrl, onSaved }: WorkspaceE
       updateMatrix(removeMatrixColumn(matrix, deleteColumn.id).matrix);
     } catch (error) {
       toast.error("Could not remove the column", {
-        description: error instanceof Error ? error.message : undefined,
+        description: errorDetail(error),
       });
     }
     setDeleteColumn(undefined);
@@ -409,7 +410,7 @@ export function MatrixEditor({ projectId, file, sourceUrl, onSaved }: WorkspaceE
       });
     } catch (error) {
       toast.error("Could not save the markdown table", {
-        description: error instanceof Error ? error.message : undefined,
+        description: errorDetail(error),
       });
     }
   };
