@@ -1,18 +1,36 @@
 import { execFile } from "node:child_process";
-import { createWriteStream, mkdirSync, readFileSync, writeFileSync, type WriteStream } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync, type WriteStream } from "node:fs";
 import { createServer } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, screen, session, shell, type MenuItemConstructorOptions, type Rectangle, type WebPreferences } from "electron";
 import { missingProductionBuilds, startLocalServers, type LocalServerName, type LocalServers } from "../../scripts/local-servers.mjs";
+import { loginShellPath } from "./shell-path";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(here, "../..");
 const loadingPage = path.join(here, "../static/loading.html");
 const mode = process.argv.includes("--dev") ? "dev" : "start";
-// pnpm records the Node.js binary that ran the script; Electron's own binary cannot run the servers.
-const nodePath = process.env.npm_node_execpath || "node";
+
+/**
+ * Where the servers and data come from. The installed app runs the servers
+ * staged into its resources (desktop/scripts/stage.mjs) on the Node.js binary
+ * shipped beside them, and keeps data in the OS user-data folder, because its
+ * own folder is read-only. Run from a checkout (pnpm desktop), it uses the
+ * repository's builds with the Node.js that pnpm ran, and shares .beeblio/
+ * with pnpm dev. Electron's own binary never runs the servers: their native
+ * modules are built for Node.js.
+ */
+const runtime = app.isPackaged
+  ? (() => {
+      const root = path.join(process.resourcesPath, "bundle");
+      return { layout: "bundle" as const, root, nodePath: path.join(root, "node", process.platform === "win32" ? "node.exe" : "node"), dataDir: path.join(app.getPath("userData"), "Data") };
+    })()
+  : (() => {
+      const root = path.resolve(here, "../..");
+      return { layout: "checkout" as const, root, nodePath: process.env.npm_node_execpath || "node", dataDir: path.join(root, ".beeblio") };
+    })();
+const { nodePath } = runtime;
 const uiPort = Number(process.env.BEEBLIO_DESKTOP_PORT || 3210);
 const uiOrigin = `http://127.0.0.1:${uiPort}`;
 const windowStateFile = () => path.join(app.getPath("userData"), "window-state.json");
@@ -81,18 +99,38 @@ async function showStartupProblem(message: string, detail: string): Promise<bool
 }
 
 async function checkPrerequisites(): Promise<{ message: string; detail: string } | undefined> {
-  const major = await nodeMajorVersion();
-  if (!major || major < 24) {
-    return { message: "Beeblio needs Node.js 24", detail: `Could not run Node.js 24 from "${nodePath}". Install Node.js 24 and start the app with pnpm desktop.` };
-  }
-  const missing = mode === "start" ? missingProductionBuilds(repoRoot) : [];
-  if (missing.length) {
-    return { message: "Build Beeblio before starting the desktop app", detail: `Run ${missing.join(" && ")} in ${repoRoot}, or use pnpm desktop:dev to run the development servers.` };
+  if (runtime.layout === "bundle") {
+    // Only a damaged installation or an antivirus quarantine removes these.
+    const missing = [nodePath, path.join(runtime.root, "ui", "server.js"), path.join(runtime.root, "agent", "server", "index.mjs")].filter((file) => !existsSync(file));
+    if (missing.length) return { message: "Beeblio's installation is incomplete", detail: `Reinstall Beeblio. Missing:\n${missing.join("\n")}` };
+  } else {
+    const major = await nodeMajorVersion();
+    if (!major || major < 24) {
+      return { message: "Beeblio needs Node.js 24", detail: `Could not run Node.js 24 from "${nodePath}". Install Node.js 24 and start the app with pnpm desktop.` };
+    }
+    const missing = mode === "start" ? missingProductionBuilds(runtime.root) : [];
+    if (missing.length) {
+      return { message: "Build Beeblio before starting the desktop app", detail: `Run ${missing.join(" && ")} in ${runtime.root}, or use pnpm desktop:dev to run the development servers.` };
+    }
   }
   if (!(await canListen(uiPort))) {
     return { message: `Port ${uiPort} is already in use`, detail: "Close the program using it, or set BEEBLIO_DESKTOP_PORT to another port." };
   }
   return undefined;
+}
+
+let shellPath: Promise<string> | undefined;
+
+/**
+ * Variables the servers need beyond the inherited ones. On macOS an app opened
+ * from Finder lacks the user's PATH, so the agent would not find python3,
+ * pandoc, or soffice; it is asked from the login shell once and reused on
+ * restarts. A terminal (pnpm desktop) already provides the right PATH.
+ */
+async function serverEnvironment(): Promise<Record<string, string>> {
+  if (runtime.layout !== "bundle" || process.platform !== "darwin") return {};
+  const pending = (shellPath ??= loginShellPath());
+  return { PATH: await pending };
 }
 
 async function startServers(): Promise<void> {
@@ -116,7 +154,7 @@ async function startServers(): Promise<void> {
     try {
       const agentPort = await canListen(0);
       if (!agentPort) throw new Error("No free local port for the agent server");
-      servers = await startLocalServers({ root: repoRoot, mode, uiPort, agentPort, nodePath, onOutput: log, onExit: (name, code, error) => void serverStopped(name, code, error) });
+      servers = await startLocalServers({ ...runtime, mode, uiPort, agentPort, extraEnv: await serverEnvironment(), onOutput: log, onExit: (name, code, error) => void serverStopped(name, code, error) });
       await servers.waitUntilReady();
     } catch (error) {
       await servers?.stop();
@@ -259,7 +297,7 @@ function buildMenu() {
       submenu: [
         ...(isMac ? [] : [settingsItem, { type: "separator" } as const]),
         { label: "Open in Browser", click: () => void shell.openExternal(currentAppUrl()) },
-        { label: "Open Data Folder", click: () => void shell.openPath(path.join(repoRoot, ".beeblio")) },
+        { label: "Open Data Folder", click: () => void shell.openPath(runtime.dataDir) },
         { label: "Open Logs", click: () => void shell.openPath(path.join(app.getPath("logs"), "servers.log")) },
         { type: "separator" },
         isMac ? { role: "close" } : { role: "quit" },

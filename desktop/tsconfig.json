@@ -3,13 +3,14 @@
   "compilerOptions": {
     "target": "ES2023",
     "lib": ["ES2023"],
-    "module": "nodenext",
-    "moduleResolution": "nodenext",
+    // Type checking only: scripts/build.mjs bundles with esbuild, which
+    // resolves imports the way a bundler does.
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "noEmit": true,
     "types": ["node"],
     "strict": true,
-    "skipLibCheck": true,
-    "rootDir": "src",
-    "outDir": "dist"
+    "skipLibCheck": true
   },
   "include": ["src"]
 }
