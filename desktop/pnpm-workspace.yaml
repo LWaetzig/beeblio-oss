@@ -1,0 +1,3 @@
+# Marks desktop/ as its own pnpm root: the web app's install and CI never
+# download Electron. Electron fetches its binary on first launch.
+packages: []

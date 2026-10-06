@@ -25,7 +25,7 @@ function makeSession(sessionKey: string, state: { folder?: string }): SandboxSes
     const root = folder();
     const workingDirectory = options.workingDirectory ? await safePath(options.workingDirectory) : root;
     const command = options.command.replace(/\/workspace(?=\/|\b)/g, '"${BEEBLIO_PROJECT_DIR}"');
-    const child = spawn("bash", ["-lc", command], {
+    const child = spawn(process.env.BEEBLIO_BASH || "bash", ["-lc", command], {
       cwd: workingDirectory,
       env: {
         ...process.env,

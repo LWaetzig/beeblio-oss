@@ -1,6 +1,7 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { defineAgent, defineDynamic } from "eve";
 import { timedModelFetch } from "./lib/model-timeout";
+import { openRouterApiKey } from "../lib/local-credentials";
 
 // Direct OpenRouter models do not provide Eve with context-window metadata.
 // Configure the size for the model selected in OPENROUTER_MODEL_ID.
@@ -22,7 +23,9 @@ export default defineAgent({
     events: {
       "step.started": async () => {
         const fetch = timedModelFetch();
-        const openrouter = createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY, fetch });
+        const apiKey = openRouterApiKey();
+        if (!apiKey) throw new Error("Add your OpenRouter API key in Settings → API Keys, or set OPENROUTER_API_KEY in .env.local");
+        const openrouter = createOpenRouter({ apiKey, fetch });
         const { modelId, contextWindow } = mainModelConfig();
         return { model: openrouter(modelId), modelContextWindowTokens: contextWindow };
       },

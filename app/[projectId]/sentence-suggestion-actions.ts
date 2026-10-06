@@ -9,6 +9,7 @@ import { requireUser } from "@/lib/auth/session";
 import { parseBibtexEntries, type BibtexEntry } from "@/lib/bibtex";
 import { cleanBibtexText } from "@/lib/citations";
 import { integerEnv } from "@/lib/env-config";
+import { openRouterApiKey } from "@/lib/local-credentials";
 import { fileStem } from "@/lib/literature/citation-identity";
 import type { LiteratureItem } from "@/lib/literature/types";
 import { CITATION_TOKEN_REGEX } from "@/lib/markdown-bibliography";
@@ -340,7 +341,7 @@ export async function generateSentenceSuggestion(input: unknown): Promise<Senten
 
   const completionSettings = parseProjectSettings(project.settings).completion ?? DEFAULT_COMPLETION_SETTINGS;
   const modelId = process.env.OPENROUTER_MODEL_ID_LITE || process.env.OPENROUTER_MODEL_ID;
-  const apiKey = process.env.OPENROUTER_API_KEY;
+  const apiKey = openRouterApiKey();
   if (!modelId || !apiKey) return { error: "Sentence suggestions are not configured." };
   const bounds = completionBounds(completionSettings.filters);
 
