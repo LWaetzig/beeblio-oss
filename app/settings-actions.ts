@@ -7,6 +7,9 @@ import { openRouterKeyStatus, saveOpenRouterApiKey, type ApiKeyStatus } from "@/
 
 type Result = { success: true; status: ApiKeyStatus } | { success: false; error: string };
 
+/** OpenRouter answers within a second normally; this keeps a stalled proxy from freezing the dialog. */
+const KEY_CHECK_TIMEOUT_MS = 10_000;
+
 const openRouterKeySchema = z
   .string()
   .trim()
@@ -30,7 +33,7 @@ export async function saveOpenRouterKey(key: unknown): Promise<Result> {
   try {
     response = await fetch("https://openrouter.ai/api/v1/key", {
       headers: { Authorization: `Bearer ${parsed.data}` },
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(KEY_CHECK_TIMEOUT_MS),
     });
   } catch {
     return { success: false, error: "Couldn't reach OpenRouter to check the key. Check your connection and try again." };
@@ -39,10 +42,10 @@ export async function saveOpenRouterKey(key: unknown): Promise<Result> {
   // Anything else may come from a proxy or firewall rather than OpenRouter, so show what it said.
   if (!response.ok) return { success: false, error: `Couldn't check the key with OpenRouter (HTTP ${response.status}): ${await failureDetail(response)}` };
 
-  saveOpenRouterApiKey(parsed.data);
-  return { success: true, status: openRouterKeyStatus() };
+  return storeKey(parsed.data);
 }
 
+/** A short, human-readable reason from an error response, whether OpenRouter's JSON or a proxy's page. */
 async function failureDetail(response: Response): Promise<string> {
   const text = (await response.text().catch(() => "")).trim();
   try {
@@ -57,6 +60,20 @@ async function failureDetail(response: Response): Promise<string> {
 /** Removes the saved key; OPENROUTER_API_KEY from .env.local applies again if set. */
 export async function removeOpenRouterKey(): Promise<Result> {
   await requireUser();
-  saveOpenRouterApiKey(null);
-  return { success: true, status: openRouterKeyStatus() };
+  return storeKey(null);
+}
+
+/**
+ * Turns disk errors (a read-only checkout, a full disk) into a message the
+ * dialog can show, instead of an opaque server action failure.
+ */
+function storeKey(key: string | null): Result {
+  try {
+    saveOpenRouterApiKey(key);
+    return { success: true, status: openRouterKeyStatus() };
+  } catch (error) {
+    console.error("Could not update .beeblio/credentials.json", error);
+    const reason = (error as NodeJS.ErrnoException).code ?? "unknown error";
+    return { success: false, error: `The key could not be written to .beeblio/credentials.json (${reason}).` };
+  }
 }

@@ -20,6 +20,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm exec eslint .
+      - run: pnpm test
       - run: pnpm build
       - run: pnpm build:eve
 

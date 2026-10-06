@@ -17,6 +17,8 @@ const uiPort = Number(process.env.BEEBLIO_DESKTOP_PORT || 3210);
 const uiOrigin = `http://127.0.0.1:${uiPort}`;
 const windowStateFile = () => path.join(app.getPath("userData"), "window-state.json");
 const serverLabels: Record<LocalServerName, string> = { "drizzle-kit": "database migration", next: "interface server", eve: "agent server" };
+/** Page loads retried while a restarted server comes back, before asking the person. */
+const MAX_LOAD_RETRIES = 5;
 
 let servers: LocalServers | undefined;
 let mainWindow: BrowserWindow | undefined;
@@ -42,9 +44,10 @@ function openExternally(url: string) {
   if (/^(https?|mailto):/i.test(url)) void shell.openExternal(url);
 }
 
+/** Mirrors server output to the terminal, servers.log, and the tail shown in error dialogs. */
 function log(name: string, chunk: Buffer | string) {
   const text = chunk.toString();
-  process.stdout.write(text);
+  if (process.stdout.writable) process.stdout.write(text);
   logStream?.write(text);
   recentLog.push(...text.split(/\r?\n/).filter(Boolean).map((line) => `[${name}] ${line}`));
   if (recentLog.length > 200) recentLog = recentLog.slice(-200);
@@ -104,6 +107,11 @@ async function startServers(): Promise<void> {
     logStream?.end();
     mkdirSync(app.getPath("logs"), { recursive: true });
     logStream = createWriteStream(path.join(app.getPath("logs"), "servers.log"));
+    // An unhandled stream error (say, a full disk) would crash the main process; losing the file log is the smaller harm.
+    logStream.on("error", (error) => {
+      console.error("servers.log is no longer written:", error);
+      logStream = undefined;
+    });
     starting = true;
     try {
       const agentPort = await canListen(0);
@@ -154,6 +162,46 @@ function savedWindowState(): WindowState | undefined {
     const visible = screen.getAllDisplays().some(({ workArea }) => state.x < workArea.x + workArea.width && state.x + state.width > workArea.x && state.y < workArea.y + workArea.height && state.y + state.height > workArea.y);
     return visible ? state : undefined;
   } catch { return undefined; }
+}
+
+/**
+ * Keeps an app window usable when its page fails: retries loads that fail
+ * while a server restarts, and offers a reload when the renderer crashes or
+ * hangs instead of leaving a blank or frozen window.
+ */
+function watchForPageFailures(window: BrowserWindow) {
+  const contents = window.webContents;
+  let failedLoads = 0;
+  contents.on("did-finish-load", () => { failedLoads = 0; });
+  contents.on("did-fail-load", (_event, errorCode, errorDescription, url, isMainFrame) => {
+    // -3 (ERR_ABORTED) is a navigation replaced by another one, not a failure.
+    if (!isMainFrame || errorCode === -3 || !isAppUrl(url) || !servers) return;
+    if (++failedLoads <= MAX_LOAD_RETRIES) {
+      // loadURL, not reload: after a failed load the committed page may be Chromium's error page.
+      setTimeout(() => { if (!window.isDestroyed()) void contents.loadURL(url); }, 500 * 2 ** failedLoads);
+      return;
+    }
+    log("desktop", `Could not load ${url}: ${errorDescription} (${errorCode})\n`);
+    void offerReload(window, "Beeblio could not load this page", `${errorDescription} (${errorCode})`);
+  });
+  contents.on("render-process-gone", (_event, details) => {
+    if (details.reason === "clean-exit") return;
+    log("desktop", `Window renderer stopped: ${details.reason} (exit code ${details.exitCode})\n`);
+    void offerReload(window, "This Beeblio window stopped working", `Reason: ${details.reason}. Your saved work is not affected.`);
+  });
+  window.on("unresponsive", () => void offerReload(window, "This Beeblio window is not responding", "You can wait for it, or reload it.", "Wait"));
+}
+
+async function offerReload(window: BrowserWindow, message: string, detail: string, dismissLabel = "Close Window") {
+  if (window.isDestroyed()) return;
+  const { response } = await dialog.showMessageBox(window, { type: "warning", message, detail, buttons: ["Reload", dismissLabel], defaultId: 0, cancelId: 1 });
+  if (window.isDestroyed()) return;
+  if (response === 0) {
+    if (servers) window.webContents.reload();
+    else void window.loadFile(loadingPage);
+  } else if (dismissLabel === "Close Window") {
+    window.destroy();
+  }
 }
 
 function createMainWindow() {
@@ -225,6 +273,8 @@ function buildMenu() {
 }
 
 function restrictWebContents() {
+  // Covers the main window and the workspace file windows the page opens.
+  app.on("browser-window-created", (_event, window) => watchForPageFailures(window));
   app.on("web-contents-created", (_event, contents) => {
     contents.on("will-attach-webview", (event) => event.preventDefault());
     contents.on("will-navigate", (event, url) => {
@@ -267,7 +317,18 @@ if (!app.requestSingleInstanceLock()) {
     servers = undefined;
     void running.stop().finally(() => { logStream?.end(); app.quit(); });
   });
-  for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => app.quit());
+  // SIGHUP too: the servers run in their own process groups, so a closed terminal no longer reaches them directly.
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.on(signal, () => app.quit());
+  // A closed terminal turns writes to stdout into EPIPE errors; the log file still has everything.
+  process.stdout.on("error", () => {});
+  process.on("unhandledRejection", (reason) => log("desktop", `Unhandled promise rejection: ${reason instanceof Error ? reason.stack : String(reason)}\n`));
+  // After an uncaught exception the main process state is unknown, so report it and quit;
+  // before-quit still stops the servers so nothing is left running.
+  process.on("uncaughtException", (error) => {
+    log("desktop", `Uncaught exception: ${error.stack ?? error.message}\n`);
+    dialog.showErrorBox("Beeblio hit an unexpected error and will close", `${error.message}\n\nDetails are in servers.log.`);
+    app.quit();
+  });
 
   // Not a top-level await: Electron does not emit "ready" until an ESM entry finishes evaluating.
   void app.whenReady().then(() => {

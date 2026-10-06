@@ -11,4 +11,5 @@ servers = await startLocalServers({
   },
 });
 for (const warning of servers.warnings) console.warn(warning);
-for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => void servers.stop());
+// SIGHUP too: the servers run in their own process groups, so a closed terminal no longer reaches them directly.
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(signal, () => void servers.stop());

@@ -9,6 +9,7 @@ Follow the setup in [README.md](README.md). Use Node.js 24 and pnpm 11, then run
 ```bash
 pnpm install --frozen-lockfile
 pnpm typecheck
+pnpm test
 pnpm build
 pnpm build:eve
 ```

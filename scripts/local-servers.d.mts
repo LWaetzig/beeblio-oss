@@ -29,3 +29,10 @@ export function startLocalServers(options: LocalServerOptions): Promise<LocalSer
 
 /** Commands to run before `mode: "start"` can serve production builds. */
 export function missingProductionBuilds(root: string): string[];
+
+/**
+ * Stops a child process and everything it spawned, escalating to a forced
+ * kill; always settles. On macOS and Linux it reaches grandchildren only if
+ * the child was spawned with `detached: true`.
+ */
+export function terminate(child: import("node:child_process").ChildProcess): Promise<void>;

@@ -4,7 +4,11 @@ import path from "node:path";
 import dotenv from "dotenv";
 
 const HOST = "127.0.0.1";
+/** How long a server gets to shut down cleanly before it is killed. */
 const STOP_TIMEOUT_MS = 5000;
+/** After a forced kill, stop waiting for the exit event so quitting can never hang. */
+const KILL_GRACE_MS = 2000;
+const IS_WINDOWS = process.platform === "win32";
 
 /**
  * Applies SQLite migrations, then starts the Next.js UI and the Eve agent.
@@ -28,8 +32,11 @@ export async function startLocalServers({ root, mode = "dev", uiPort = 3000, age
 
   // Run each CLI's JavaScript entry with Node directly: the node_modules/.bin
   // shims are .cmd files on Windows, which spawn cannot start without a shell.
-  function start(name, args) {
-    const child = spawn(nodePath, [binEntry(root, name), ...args], { cwd: root, env, stdio: onOutput ? ["ignore", "pipe", "pipe"] : "inherit", windowsHide: true });
+  // On macOS and Linux each long-running server leads its own process group, so
+  // stopping it also reaches its workers and the agent's shell commands (see
+  // terminate). The short migration stays in our group so Ctrl+C still stops it.
+  function start(name, args, { ownProcessGroup = false } = {}) {
+    const child = spawn(nodePath, [binEntry(root, name), ...args], { cwd: root, env, detached: ownProcessGroup && !IS_WINDOWS, stdio: onOutput ? ["ignore", "pipe", "pipe"] : "inherit", windowsHide: true });
     if (onOutput) for (const stream of [child.stdout, child.stderr]) stream.on("data", (chunk) => onOutput(name, chunk));
     return child;
   }
@@ -41,8 +48,8 @@ export async function startLocalServers({ root, mode = "dev", uiPort = 3000, age
   });
 
   const children = new Map([
-    ["next", start("next", [mode, "--hostname", HOST, "--port", String(uiPort)])],
-    ["eve", start("eve", mode === "dev" ? ["dev", "--no-ui", "--host", HOST, "--port", String(agentPort)] : ["start", "--host", HOST, "--port", String(agentPort)])],
+    ["next", start("next", [mode, "--hostname", HOST, "--port", String(uiPort)], { ownProcessGroup: true })],
+    ["eve", start("eve", mode === "dev" ? ["dev", "--no-ui", "--host", HOST, "--port", String(agentPort)] : ["start", "--host", HOST, "--port", String(agentPort)], { ownProcessGroup: true })],
   ]);
 
   let stopping;
@@ -80,24 +87,65 @@ export function missingProductionBuilds(root) {
   return missing;
 }
 
+/** Resolves a CLI's JavaScript entry; fails with a fix, not an ENOENT, when dependencies are missing. */
 function binEntry(root, name) {
   const dir = path.join(root, "node_modules", name);
-  const { bin } = JSON.parse(readFileSync(path.join(dir, "package.json"), "utf8"));
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(path.join(dir, "package.json"), "utf8"));
+  } catch (error) {
+    throw new Error(`Could not find ${name} in ${path.join(root, "node_modules")}. Run pnpm install in ${root}.`, { cause: error });
+  }
+  const { bin } = manifest;
   return path.join(dir, typeof bin === "string" ? bin : bin[name]);
 }
 
-/** Kills the server and everything it spawned, such as the agent's shell commands. */
-function terminate(child) {
+/**
+ * Stops a server and everything it spawned, such as Next.js workers and the
+ * agent's shell commands, which would otherwise outlive the app and keep its
+ * ports busy. Always settles, even if the process never reports its exit.
+ */
+export function terminate(child) {
   if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
   return new Promise((resolve) => {
-    const kill = (force) => {
-      if (process.platform === "win32") execFile("taskkill", ["/pid", String(child.pid), "/T", "/F"], () => {});
-      else child.kill(force ? "SIGKILL" : "SIGTERM");
+    let forceTimer;
+    let giveUpTimer;
+    const done = () => {
+      clearTimeout(forceTimer);
+      clearTimeout(giveUpTimer);
+      // The leader can exit while members of its group ignored SIGTERM; clean them up too.
+      signalTree(child, "SIGKILL");
+      resolve();
     };
-    const timer = setTimeout(() => kill(true), STOP_TIMEOUT_MS);
-    child.once("exit", () => { clearTimeout(timer); resolve(); });
-    kill(false);
+    child.once("exit", done);
+    forceTimer = setTimeout(() => {
+      signalTree(child, "SIGKILL");
+      giveUpTimer = setTimeout(done, KILL_GRACE_MS);
+    }, STOP_TIMEOUT_MS);
+    signalTree(child, "SIGTERM");
   });
+}
+
+/**
+ * Signals the child's whole process tree. Windows has no SIGTERM for console
+ * programs, so taskkill /T force-stops the tree at once. Elsewhere the child
+ * leads its own process group (spawned detached), so a negative PID reaches
+ * every member; the group ID stays reserved while any member is alive, so this
+ * cannot hit an unrelated process.
+ */
+function signalTree(child, signal) {
+  if (IS_WINDOWS) {
+    if (child.exitCode === null && child.signalCode === null) execFile("taskkill", ["/pid", String(child.pid), "/T", "/F"], () => {});
+    return;
+  }
+  try {
+    process.kill(-child.pid, signal);
+  } catch (error) {
+    if (error.code !== "ESRCH") throw error;
+    // No such group: either it is already gone, or the child was not spawned
+    // detached and only the child itself can be reached.
+    if (child.exitCode === null && child.signalCode === null) child.kill(signal);
+  }
 }
 
 /** Git for Windows' bash.exe; never System32\bash.exe, which starts WSL with different paths. */
