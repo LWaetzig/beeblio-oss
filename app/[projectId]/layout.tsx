@@ -1,3 +1,4 @@
+import { stat } from "node:fs/promises";
 import type { ReactNode } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -10,6 +11,7 @@ import {
 } from "@/lib/project-settings";
 import { listAgentSkills } from "@/lib/skills-storage";
 import { getOwnedProject } from "./actions";
+import { MissingProjectFolder } from "./_components/missing-project-folder";
 import { ProjectLayoutUI } from "./_components/project-layout-ui";
 import { ShareStatusProvider } from "./_components/share-status-context";
 import { UpcomingFeatureDialog } from "./_components/upcoming-feature";
@@ -51,6 +53,14 @@ async function readDefaultFileSeed(
   }
 }
 
+async function isFolder(folderPath: string): Promise<boolean> {
+  try {
+    return (await stat(folderPath)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 export default async function ProjectLayout({
   children,
   params,
@@ -72,6 +82,9 @@ export default async function ProjectLayout({
   const initialRootTree = workspaceListing.rootTree;
   if (!project) {
     redirect("/workspace");
+  }
+  if (project.folderPath && !(await isFolder(project.folderPath))) {
+    return <MissingProjectFolder projectName={project.name} folderPath={project.folderPath} />;
   }
   
   const initialActivity = rememberedRailActivity(
