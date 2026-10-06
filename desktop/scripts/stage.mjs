@@ -75,6 +75,9 @@ function forbiddenFiles(dir, found = []) {
 }
 
 const nodeMajor = Number(process.versions.node.split(".")[0]);
+// The Mac app is built for Apple Silicon only (electron-builder.config.cjs); an Intel
+// Node.js here would ship x64 native modules inside an arm64 app.
+if (process.platform === "darwin" && process.arch !== "arm64") fail(`the Mac app is Apple Silicon only; run this on an Apple Silicon Mac with an arm64 Node.js (this is ${process.arch}).`);
 if (nodeMajor !== REQUIRED_NODE_MAJOR) fail(`run this with Node.js ${REQUIRED_NODE_MAJOR}; it ships the Node.js binary running it, and this is ${process.version}.`);
 requireFile(path.join(repo, ".next", "standalone", "server.js"), "Build the UI with BEEBLIO_STANDALONE=1 pnpm build in the repository root.");
 requireFile(path.join(repo, ".output", "server", "index.mjs"), "Build the agent with pnpm build:eve in the repository root.");

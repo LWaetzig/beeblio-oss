@@ -39,23 +39,30 @@ Choose **Link Project Folder** to select a folder. You can also paste its absolu
 
 ## Desktop app
 
-Beeblio also runs as a desktop app for macOS and Windows, in its own window. It includes everything it needs to run, so you don't need Node.js or a checkout.
+Beeblio also runs as a desktop app for Apple Silicon Macs (macOS 12 or later) and Windows, in its own window. It includes everything it needs to run, so you don't need Node.js or a checkout.
 
 ### Install
 
-Download the installer for your computer from the project's [Releases](https://github.com/alharkan7/beeblio-oss/releases): `…-mac-arm64.dmg` for Apple Silicon Macs, `…-mac-x64.dmg` for Intel Macs, or `…-win-x64.exe` for Windows. On first launch, Beeblio opens **Settings**. Add your OpenRouter API key and choose a main model, and you can start chatting.
+Download the installer for your computer from the project's [Releases](https://github.com/alharkan7/beeblio-oss/releases): `…-mac-arm64.dmg` for Macs with Apple Silicon, or `…-win-x64.exe` for Windows. Intel Macs are not supported. On first launch, Beeblio opens **Settings**. Add your OpenRouter API key and choose a main model, and you can start chatting.
 
 The installers are not signed with a developer certificate yet, so your system warns you the first time you open the app:
 
 - **macOS:** Open the app once and dismiss the warning, then open **System Settings → Privacy & Security** and choose **Open Anyway** next to Beeblio. If macOS says the app "is damaged", run `xattr -dr com.apple.quarantine /Applications/Beeblio.app` in Terminal, then open it again.
 - **Windows:** On the "Windows protected your PC" screen, choose **More info → Run anyway**. Beeblio installs for your user account only and needs no administrator rights.
 
-The agent runs commands with tools on your computer:
+The agent runs commands with programs on your computer. **Settings → System Tools** checks which ones are installed and how to install the rest:
+- Python 3 with pandas and python-docx, for analysis and Word files.
+- [Pandoc](https://pandoc.org), for LaTeX and Word export.
+- [LibreOffice](https://www.libreoffice.org), for Office files.
+- FFmpeg, Poppler and Tesseract, for media, PDFs and OCR.
 
-- **macOS:** Beeblio reads your shell's `PATH`, so tools you installed with Homebrew are found.
-- **Windows:** Install [Git for Windows](https://git-scm.com/download/win); the agent runs shell commands with its Git Bash.
+On each platform:
+- **macOS:** Beeblio reads your shell's `PATH`, so tools you installed with Homebrew are found, and LibreOffice is found in `/Applications`.
+- **Windows:** Install [Git for Windows](https://git-scm.com/download/win); the agent runs shell commands with its Git Bash. Install Python from [python.org](https://www.python.org/downloads/) and select "Add python.exe to PATH". The agent's `python3` then uses it.
 
-For Python analysis, install Python 3 (as `python3`). Install [Pandoc](https://pandoc.org) for LaTeX and Word export, and [LibreOffice](https://www.libreoffice.org) to check Office files.
+To attach a screenshot to a chat message, use the screen button next to the attach button. On macOS, the first time, allow Beeblio under **System Settings → Privacy & Security → Screen & System Audio Recording**.
+
+If Beeblio closes unexpectedly (a crash or Force Quit), its local servers stop on their own, so it starts normally the next time.
 
 Beeblio keeps its data in your user folder, outside the app: `~/Library/Application Support/Beeblio/Data` on macOS and `%APPDATA%\Beeblio\Data` on Windows. **File → Open Data Folder** opens it, and uninstalling leaves it in place. The interface listens on `127.0.0.1:3210`. Server output is written to `servers.log` (**File → Open Logs**).
 
@@ -74,7 +81,7 @@ pnpm desktop
 
 ### Build the installers
 
-Installers are built on the platform they are for: a Mac builds the `.dmg`, Windows the `.exe`. The UI must come from a flat install, because pnpm's linked `node_modules` cannot be packaged:
+Installers are built on the platform they are for: an Apple Silicon Mac builds the `.dmg`, Windows the `.exe`. The UI must come from a flat install, because pnpm's linked `node_modules` cannot be packaged:
 
 ```bash
 pnpm install --frozen-lockfile --config.node-linker=hoisted
@@ -86,7 +93,7 @@ pnpm --dir desktop dist
 
 The installer is written to `desktop/release/`. Run `pnpm install` again afterwards to return to the usual layout. On Linux, `pnpm --dir desktop dist` builds an unpacked app in `desktop/release/linux-unpacked` for testing; it is not released.
 
-**Releases:** set the new version in `desktop/package.json` and push a tag such as `v0.2.0`. The [Desktop release](.github/workflows/desktop-release.yml) workflow builds all three installers and attaches them to a draft GitHub Release, which you review and publish. Run the workflow by hand to build the installers without making a release.
+**Releases:** set the new version in `desktop/package.json` and push a tag such as `v0.2.0`. The [Desktop release](.github/workflows/desktop-release.yml) workflow builds both installers and attaches them to a draft GitHub Release, which you review and publish. It also builds them, without a release, for pushes and pull requests that change the desktop app or its packaging, and when run by hand.
 
 **Signing:** the workflow signs builds once these repository secrets exist, and works without them:
 

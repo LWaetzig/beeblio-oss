@@ -9,11 +9,23 @@ name: Desktop release
 on:
   push:
     tags: ["v*"]
-  pull_request:
+    # Work branches too, so installers are known to build before a pull request
+    # exists. Path filters are not applied to tag pushes, so tags always build.
+    branches: ["**"]
     paths:
       - "desktop/**"
-      - "scripts/local-servers.mjs"
-      - "scripts/migrate.mjs"
+      - "agent/sandbox/**"
+      - "scripts/**"
+      - "next.config.ts"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/desktop-release.yml"
+  pull_request:
+    # Keep in step with the list above.
+    paths:
+      - "desktop/**"
+      - "agent/sandbox/**"
+      - "scripts/**"
       - "next.config.ts"
       - "package.json"
       - "pnpm-lock.yaml"
@@ -36,7 +48,6 @@ jobs:
       matrix:
         include:
           - { name: macOS (Apple Silicon), runner: macos-15 }
-          - { name: macOS (Intel), runner: macos-15-intel }
           - { name: Windows, runner: windows-latest }
     env:
       # next.config.ts: build the UI as a self-contained server.

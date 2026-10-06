@@ -28,7 +28,9 @@ module.exports = {
   },
   artifactName: "${productName}-${version}-${os}-${arch}.${ext}",
   mac: {
-    target: ["dmg"],
+    // Apple Silicon only: the bundled Node.js and native modules are built for the Mac that builds the app.
+    target: [{ target: "dmg", arch: ["arm64"] }],
+    minimumSystemVersion: "12.0",
     category: "public.app-category.productivity",
     // "-" signs ad hoc; null would leave the app unsigned, which Apple Silicon refuses to open.
     identity: hasMacCertificate ? undefined : "-",
