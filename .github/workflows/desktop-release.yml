@@ -91,12 +91,20 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           # Stops electron-builder looking for a certificate in the keychain when none was given.
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          # Where installed apps look for updates; see docs/desktop-updates.md.
+          BEEBLIO_RELEASE_REPO: ${{ vars.BEEBLIO_RELEASE_REPO || github.repository }}
       - uses: actions/upload-artifact@v4
         with:
           name: beeblio-${{ runner.os }}-${{ runner.arch }}
+          # The installers, plus what the app's updater reads: latest*.yml names
+          # the newest version, the zip is what macOS updates from, and the
+          # blockmaps let an update download only what changed.
           path: |
             desktop/release/*.dmg
+            desktop/release/*.zip
             desktop/release/*.exe
+            desktop/release/*.blockmap
+            desktop/release/latest*.yml
           if-no-files-found: error
 
   release:
@@ -124,4 +132,10 @@ jobs:
       - name: Create the draft release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" installers/* --draft --verify-tag --generate-notes --title "Beeblio ${GITHUB_REF_NAME#v}"
+        # A draft reaches no one: installed apps only see published releases, so
+        # publishing it is the moment users are offered the update. A tag such
+        # as v0.2.0-beta.1 becomes a prerelease, which the apps never offer.
+        run: |
+          channel=()
+          [[ "$GITHUB_REF_NAME" == *-* ]] && channel=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" installers/* --draft "${channel[@]}" --verify-tag --generate-notes --title "Beeblio ${GITHUB_REF_NAME#v}"
