@@ -1,7 +1,7 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { generateText } from "ai";
 import { integerEnv } from "@/lib/env-config";
-import { openRouterApiKey } from "@/lib/local-credentials";
+import { appSetting, openRouterApiKey } from "@/lib/app-settings";
 import { db } from "@/db";
 import { projects } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
@@ -24,9 +24,9 @@ export async function generateEquationLatex(input: {
 }): Promise<{ latex: string; modelSource: "system" | "byok" } | { error: string }> {
   const project = await db.query.projects.findFirst({ where: and(eq(projects.slug, input.projectId), eq(projects.userId, input.userId)) });
   if (!project) return { error: "Project not found." };
-  const modelId = process.env.OPENROUTER_MODEL_ID_LITE || process.env.OPENROUTER_MODEL_ID;
+  const modelId = appSetting("OPENROUTER_MODEL_ID_LITE") || appSetting("OPENROUTER_MODEL_ID");
   const apiKey = openRouterApiKey();
-  if (!modelId || !apiKey) return { error: "Equation AI is not configured." };
+  if (!modelId || !apiKey) return { error: "Equation AI needs an OpenRouter key and model. Add them in Settings." };
 
   try {
     const openrouter = createOpenRouter({ apiKey });

@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ProjectSettingsDialog } from "@/app/[projectId]/_components/project-settings-dialog";
 import { AppSettingsDialog } from "./app-settings-dialog";
+import { getSetupStatus } from "../settings-actions";
 import type { ProjectSettings } from "@/lib/project-settings";
 
 /**
@@ -41,8 +42,30 @@ export function UserMenu({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [appSettingsOpen, setAppSettingsOpen] = useState(false);
 
+  const [missingSetup, setMissingSetup] = useState<string[]>([]);
+
   // The desktop app's Settings… menu item opens the same dialog.
   useEffect(() => window.beeblioDesktop?.onOpenSettings(() => setAppSettingsOpen(true)), []);
+
+  // An installed app has no .env.local, so on first run the agent cannot work
+  // until the required settings exist. The desktop app opens Settings by
+  // itself, once per session so it does not reappear on every page; a browser
+  // only shows the hint, since its user started from a configured checkout.
+  useEffect(() => {
+    let cancelled = false;
+    void getSetupStatus()
+      .then(({ missingRequired }) => {
+        if (cancelled) return;
+        setMissingSetup(missingRequired);
+        if (missingRequired.length && window.beeblioDesktop && !wasPromptedThisSession()) setAppSettingsOpen(true);
+      })
+      .catch(() => {
+        // The hint is a convenience; the agent reports missing settings itself.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const user = initialUser;
   if (!user) return null;
@@ -54,12 +77,13 @@ export function UserMenu({
   return (
     <>
       <DropdownMenu>
-      <DropdownMenuTrigger aria-label="Open workspace menu" className="workspace-rail-secondary flex size-9 items-center justify-center gap-2 rounded-lg text-xs font-medium text-muted-foreground outline-none ring-0 transition-colors hover:bg-accent/70 hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/20">
+      <DropdownMenuTrigger aria-label={missingSetup.length ? "Open workspace menu (setup incomplete)" : "Open workspace menu"} className="workspace-rail-secondary relative flex size-9 items-center justify-center gap-2 rounded-lg text-xs font-medium text-muted-foreground outline-none ring-0 transition-colors hover:bg-accent/70 hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/20">
           <Avatar className="size-7 cursor-pointer border border-border/80 shadow-[0_2px_8px_-4px_rgb(18_35_48/0.3)] transition-transform hover:-translate-y-0.5 active:translate-y-0">
             <AvatarImage src={user.image || ""} alt={name} />
             <AvatarFallback className="bg-primary/10 text-primary">{initial}</AvatarFallback>
           </Avatar>
           <span className="workspace-rail-label hidden min-w-0 truncate text-xs font-medium">{name}</span>
+          {missingSetup.length ? <span className="absolute right-1 top-1 size-2 rounded-full bg-amber-500 ring-2 ring-background" aria-hidden="true" /> : null}
         </DropdownMenuTrigger>
         <DropdownMenuContent
           side="right"
@@ -82,7 +106,8 @@ export function UserMenu({
             onSelect={() => setAppSettingsOpen(true)}
           >
             <Settings className="h-4 w-4" />
-            <span>Settings</span>
+            <span>{missingSetup.length ? "Finish setup" : "Settings"}</span>
+            {missingSetup.length ? <span className="ml-auto size-2 rounded-full bg-amber-500" aria-hidden="true" /> : null}
           </DropdownMenuItem>
           <div className="flex min-h-10 items-center gap-2 px-2.5 py-1.5" role="group" aria-label="Theme">
             <span className="flex min-w-0 flex-1 items-center gap-2 text-sm">
@@ -121,7 +146,7 @@ export function UserMenu({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      <AppSettingsDialog open={appSettingsOpen} onOpenChange={setAppSettingsOpen} />
+      <AppSettingsDialog open={appSettingsOpen} onOpenChange={setAppSettingsOpen} onSaved={({ missingRequired }) => setMissingSetup(missingRequired)} />
       {projectId ? (
         <ProjectSettingsDialog
           projectId={projectId}
@@ -135,4 +160,17 @@ export function UserMenu({
       ) : null}
     </>
   );
+}
+
+const SETUP_PROMPT_KEY = "beeblio:setup-prompted";
+
+/** Records the automatic prompt; storage can be unavailable, in which case it may show again. */
+function wasPromptedThisSession(): boolean {
+  try {
+    if (sessionStorage.getItem(SETUP_PROMPT_KEY)) return true;
+    sessionStorage.setItem(SETUP_PROMPT_KEY, "1");
+  } catch {
+    // Private mode or blocked storage.
+  }
+  return false;
 }

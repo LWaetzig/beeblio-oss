@@ -29,9 +29,8 @@ In the browser, the folder picker uses macOS's native chooser; on other systems,
 
 ```bash
 pnpm install
-cp .env.example .env.local
-# Set OPENROUTER_API_KEY and OPENROUTER_MODEL_ID in .env.local
 pnpm dev
+# Open http://127.0.0.1:3000 and add your OpenRouter key and model in Settings
 ```
 
 Open [http://127.0.0.1:3000](http://127.0.0.1:3000). The root URL redirects to `/workspace`. `pnpm dev` creates `.beeblio/` if needed, applies SQLite migrations, and starts both the Next.js UI and the Eve agent. They listen on `127.0.0.1:3000` and `127.0.0.1:2000` respectively.
@@ -55,7 +54,9 @@ The desktop app uses the same `.env.local` and `.beeblio/` data as `pnpm dev`, s
 
 ## Configuration
 
-The main agent needs `OPENROUTER_API_KEY`, `OPENROUTER_MODEL_ID`, and `OPENROUTER_MODEL_CONTEXT_WINDOW_TOKENS`. Set the context window to the token limit of the OpenRouter model you selected. You can also enter the OpenRouter key in the app under **Settings → API Keys** (account menu, or **Settings…** in the desktop app's menu). Beeblio checks the key with OpenRouter, stores it in `.beeblio/credentials.json`, and uses it right away instead of the `.env.local` value; remove it there to fall back to `.env.local`. Copy [`.env.example`](./.env.example) for all settings:
+Everything is configured in the app under **Settings** (account menu, or **Settings…** in the desktop app's menu); until the required settings exist, the menu shows **Finish setup**. The main agent needs an OpenRouter API key, a main model, and that model's context window. Beeblio checks the key with OpenRouter, looks the model up there, and fills in its context window. Changes apply right away, without a restart.
+
+In a checkout you can also set any of these as environment variables in `.env.local`; copy [`.env.example`](./.env.example). A value saved in Settings takes precedence, and removing it there falls back to `.env.local`. The settings are:
 
 | Setting | Used for |
 | --- | --- |
@@ -76,7 +77,7 @@ The application has one local user and no browser login or accounts checks. Keep
 - **Project files:** Your linked folders. Browser uploads, downloads, and agent file operations use local filesystem routes.
 - **Application data:** `.beeblio/beeblio.sqlite` stores projects, conversation state, knowledge metadata, and share records. Schema migrations are in [`drizzle/`](./drizzle/).
 - **Internal secret:** `.beeblio/agent-secret` is generated automatically for the local UI-to-agent connection.
-- **API keys from Settings:** `.beeblio/credentials.json`, readable only by your user account.
+- **Settings:** `.beeblio/settings.json`, including API keys, readable only by your user account.
 - **Agent compute:** Eve runs Bash and Python on the host. No Docker image or separate database server is required. The bundled `beeblio_research` Python helper is available to agent commands; other Python packages come from your local environment.
 
 Beeblio still calls external model and research APIs when those features are used. Back up both your project folders and `.beeblio/` if you need to preserve files and conversation history.
