@@ -271,10 +271,12 @@ function buildMenu() {
     const url = BrowserWindow.getFocusedWindow()?.webContents.getURL();
     return isAppUrl(url) ? url! : `${uiOrigin}/workspace`;
   };
-  const openSettings = () => {
+  /** Asks the app's page to do something; a window showing the loading or error page has no app to ask. */
+  const sendToApp = (channel: string) => {
     const window = [BrowserWindow.getFocusedWindow(), mainWindow].find((candidate) => candidate && isAppUrl(candidate.webContents.getURL()));
-    window?.webContents.send("beeblio:open-settings");
+    window?.webContents.send(channel);
   };
+  const openSettings = () => sendToApp("beeblio:open-settings");
   const settingsItem: MenuItemConstructorOptions = { label: "Settings…", accelerator: "CmdOrCtrl+,", click: openSettings };
   const template: MenuItemConstructorOptions[] = [
     ...(isMac ? [{
@@ -307,6 +309,13 @@ function buildMenu() {
     { role: "editMenu" },
     { role: "viewMenu" },
     { role: "windowMenu" },
+    {
+      role: "help",
+      submenu: [
+        { label: "Show Tour", click: () => sendToApp("beeblio:show-tour") },
+        { label: "Beeblio on GitHub", click: () => void shell.openExternal("https://github.com/alharkan7/beeblio-oss") },
+      ],
+    },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }

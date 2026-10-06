@@ -107,7 +107,8 @@ import {
   ResearchArtifactBrowser,
   type ResearchArtifactView,
 } from "./research-artifact-browser";
-import { activities, rememberRailActivity, SKILLS_RAIL_ITEM, type Activity } from "./rail-activity";
+import { activities, railTourTarget, rememberRailActivity, SKILLS_RAIL_ITEM, type Activity } from "./rail-activity";
+import { WorkspaceTour } from "@/app/_components/onboarding/workspace-tour";
 import { ChatHistory } from "./chat-history";
 import { SkillsPanel } from "./skills-panel";
 import { ShortcutsDialog } from "./shortcuts-dialog";
@@ -1098,6 +1099,7 @@ export function ProjectLayoutUI({
                     )}
                     aria-label={label}
                     aria-pressed={active}
+                    data-tour={railTourTarget(id)}
                     onPointerEnter={() => setRailTooltipActivity(id)}
                     onPointerLeave={() => setRailTooltipActivity((current) => current === id ? undefined : current)}
                     onFocus={() => setRailTooltipActivity(id)}
@@ -1150,6 +1152,7 @@ export function ProjectLayoutUI({
                   )}
                   aria-label="Shortcuts"
                   aria-haspopup="dialog"
+                  data-tour="shortcuts"
                   onPointerEnter={() => setShortcutsTooltipOpen(true)}
                   onPointerLeave={() => setShortcutsTooltipOpen(false)}
                   onFocus={() => setShortcutsTooltipOpen(true)}
@@ -1184,6 +1187,7 @@ export function ProjectLayoutUI({
                     )}
                     aria-label={label}
                     aria-pressed={active}
+                    data-tour={railTourTarget(id)}
                     onPointerEnter={() => setRailTooltipActivity(id)}
                     onPointerLeave={() => setRailTooltipActivity((current) => current === id ? undefined : current)}
                     onFocus={() => setRailTooltipActivity(id)}
@@ -1202,7 +1206,7 @@ export function ProjectLayoutUI({
             })()}
             <div className={cn("mb-1 w-full border-t border-border/50", isMobile || !railExpanded ? "max-w-6" : "")} aria-hidden="true" />
             {userMenu ? (
-              <div className={cn(isMobile || !railExpanded ? "w-9" : "w-full")}>
+              <div className={cn(isMobile || !railExpanded ? "w-9" : "w-full")} data-tour="account">
                 {userMenu}
               </div>
             ) : null}
@@ -1355,6 +1359,7 @@ export function ProjectLayoutUI({
                   className="mb-[5px] size-8 shrink-0 self-center text-muted-foreground"
                   onClick={() => setQuickOpen(true)}
                   aria-label="Quick open files, library, or literature"
+                  data-tour="quick-open"
                   aria-keyshortcuts="Control+P Meta+P"
                 >
                   <Search className="size-4" />
@@ -1371,6 +1376,7 @@ export function ProjectLayoutUI({
                   // onClick={() => notifyUpcomingFeature("Document Review")}
                   onClick={openReviewPanel}
                   aria-label="Open document review"
+                  data-tour="review"
                 >
                   <ShieldCheck className="size-4.5" />
                 </Button>
@@ -1388,6 +1394,7 @@ export function ProjectLayoutUI({
                 // } 
                 onClick={openAgentPanel}
                 aria-label="Open Beeblio AI"
+                data-tour="agent-toggle"
               >
                 <img src="/beeblio-mark.svg" alt="" className="size-5 rounded-md" />
                 <span className="font-semibold">Beeblio AI</span>
@@ -1446,6 +1453,7 @@ export function ProjectLayoutUI({
           />
         ) : null}
         <aside
+          data-tour={agentOpen ? "agent-panel" : undefined}
           className={cn(
             "flex shrink-0 flex-col overflow-hidden bg-card",
             isMobile
@@ -1743,6 +1751,7 @@ export function ProjectLayoutUI({
         onOpenFileWithCue={openFileWithCue}
       />
       <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+      <WorkspaceTour />
     </WorkspaceContext.Provider>
     </MatrixTargetsProvider>
   );

@@ -1,8 +1,8 @@
-import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 
 import { dataDir } from "./app-paths";
+import { writeAtomically } from "./atomic-write";
 import { SETTINGS, settingDefinition, type SettingName, type SettingsSnapshot, type SettingStatus } from "./app-settings-registry";
 
 /**
@@ -18,10 +18,6 @@ type StoredSettings = { version: 1; values: Partial<Record<SettingName, string>>
 const settingsFile = () => path.join(dataDir(), "settings.json");
 /** Where the first desktop release kept the OpenRouter key; moved into settings.json on first read. */
 const legacyCredentialsFile = () => path.join(dataDir(), "credentials.json");
-
-/** Windows reports these while antivirus or an indexer briefly holds the target open. */
-const TRANSIENT_RENAME_ERRORS = new Set(["EPERM", "EACCES", "EBUSY"]);
-const RENAME_ATTEMPTS = 5;
 
 /**
  * Keyed by file so tests and processes with another data folder never share an
@@ -140,34 +136,4 @@ function migrateLegacyCredentials(): StoredSettings["values"] {
   writeSettingsFile(values);
   rmSync(legacyCredentialsFile(), { force: true });
   return values;
-}
-
-/**
- * Writes through a uniquely named temporary file and renames it into place, so
- * the agent server never reads a half-written file and two concurrent saves
- * cannot clobber each other's temporary file. Mode 600 keeps keys private.
- */
-function writeAtomically(file: string, contents: string): void {
-  mkdirSync(path.dirname(file), { recursive: true });
-  const temporary = `${file}.${randomUUID()}.tmp`;
-  try {
-    writeFileSync(temporary, contents, { mode: 0o600 });
-    renameWithRetry(temporary, file);
-  } catch (error) {
-    rmSync(temporary, { force: true });
-    throw error;
-  }
-}
-
-function renameWithRetry(from: string, to: string): void {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      return renameSync(from, to);
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (process.platform !== "win32" || attempt >= RENAME_ATTEMPTS || !code || !TRANSIENT_RENAME_ERRORS.has(code)) throw error;
-      // Synchronous on purpose: callers rely on the file being in place when this returns.
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20 * attempt);
-    }
-  }
 }

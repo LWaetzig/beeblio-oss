@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { ArrowUpRight, Globe, Moon, Settings, SlidersHorizontal, Sun, User } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { ArrowUpRight, Compass, Globe, Moon, Settings, SlidersHorizontal, Sun, User } from "lucide-react";
 import { useTheme } from "next-themes";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -15,13 +15,17 @@ import {
 import { ProjectSettingsDialog } from "@/app/[projectId]/_components/project-settings-dialog";
 import { AppSettingsDialog } from "./app-settings-dialog";
 import { getSetupStatus } from "../settings-actions";
+import { getOnboarding } from "../onboarding-actions";
+import { WelcomeDialog } from "./onboarding/welcome-dialog";
+import { START_TOUR_EVENT } from "./onboarding/workspace-tour";
 import type { ProjectSettings } from "@/lib/project-settings";
 
 /**
  * projectId is passed only by the project rail layout, so the per-project
  * settings entry appears there and not in the workspace header.
  * initialSettings (layout-provided) lets the dialog open without refetching.
- * The local identity is supplied by the server.
+ * The local identity is supplied by the server. hasProjects is passed only by
+ * the projects page, which is where the first-run welcome appears.
  */
 export function UserMenu({
   user: initialUser,
@@ -30,6 +34,7 @@ export function UserMenu({
   projectName,
   projectDescription,
   resolvedDefaultFile,
+  hasProjects,
 }: {
   user?: { name?: string | null; email: string; image?: string | null };
   projectId?: string;
@@ -37,27 +42,48 @@ export function UserMenu({
   projectName?: string;
   projectDescription?: string;
   resolvedDefaultFile?: string;
+  hasProjects?: boolean;
 }) {
   const { setTheme, theme } = useTheme();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [appSettingsOpen, setAppSettingsOpen] = useState(false);
 
+  const [welcomeOpen, setWelcomeOpen] = useState(false);
   const [missingSetup, setMissingSetup] = useState<string[]>([]);
+  const onProjectsPage = !projectId && hasProjects !== undefined;
 
   // The desktop app's Settings… menu item opens the same dialog.
   useEffect(() => window.beeblioDesktop?.onOpenSettings(() => setAppSettingsOpen(true)), []);
 
-  // An installed app has no .env.local, so on first run the agent cannot work
-  // until the required settings exist. The desktop app opens Settings by
-  // itself, once per session so it does not reappear on every page; a browser
-  // only shows the hint, since its user started from a configured checkout.
+  // "Show tour": inside a project the workspace tour starts over; on the
+  // projects page the welcome does, since the tour needs a project.
+  const showTour = useCallback(() => {
+    if (!projectId) {
+      setWelcomeOpen(true);
+      return;
+    }
+    window.dispatchEvent(new CustomEvent(START_TOUR_EVENT));
+  }, [projectId]);
+  useEffect(() => window.beeblioDesktop?.onShowTour?.(showTour), [showTour]);
+
+  // The welcome includes connecting a model, so on first run it comes first.
+  // Afterwards an installed app, which has no .env.local, still opens Settings
+  // by itself while required settings are missing: once per session, so it
+  // does not reappear on every page, and never over the workspace tour. A
+  // browser only shows the hint, since its user started from a configured
+  // checkout.
   useEffect(() => {
     let cancelled = false;
-    void getSetupStatus()
-      .then(({ missingRequired }) => {
+    void Promise.all([getSetupStatus(), getOnboarding().catch(() => undefined)])
+      .then(([{ missingRequired }, onboarding]) => {
         if (cancelled) return;
         setMissingSetup(missingRequired);
-        if (missingRequired.length && window.beeblioDesktop && !wasPromptedThisSession()) setAppSettingsOpen(true);
+        if (onboarding && !onboarding.welcome && onProjectsPage) {
+          setWelcomeOpen(true);
+          return;
+        }
+        const walkthroughPending = !onboarding || !onboarding.welcome || (projectId && !onboarding.tour);
+        if (missingRequired.length && window.beeblioDesktop && !walkthroughPending && !wasPromptedThisSession()) setAppSettingsOpen(true);
       })
       .catch(() => {
         // The hint is a convenience; the agent reports missing settings itself.
@@ -65,7 +91,7 @@ export function UserMenu({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [onProjectsPage, projectId]);
 
   const user = initialUser;
   if (!user) return null;
@@ -109,6 +135,10 @@ export function UserMenu({
             <span>{missingSetup.length ? "Finish setup" : "Settings"}</span>
             {missingSetup.length ? <span className="ml-auto size-2 rounded-full bg-amber-500" aria-hidden="true" /> : null}
           </DropdownMenuItem>
+          <DropdownMenuItem className="cursor-pointer" onSelect={showTour}>
+            <Compass className="h-4 w-4" />
+            <span>Show tour</span>
+          </DropdownMenuItem>
           <div className="flex min-h-10 items-center gap-2 px-2.5 py-1.5" role="group" aria-label="Theme">
             <span className="flex min-w-0 flex-1 items-center gap-2 text-sm">
               <ThemeIcon className="size-4 text-muted-foreground" />
@@ -147,6 +177,7 @@ export function UserMenu({
         </DropdownMenuContent>
       </DropdownMenu>
       <AppSettingsDialog open={appSettingsOpen} onOpenChange={setAppSettingsOpen} onSaved={({ missingRequired }) => setMissingSetup(missingRequired)} />
+      {!projectId ? <WelcomeDialog open={welcomeOpen} onOpenChange={setWelcomeOpen} hasProjects={Boolean(hasProjects)} onSetupChange={setMissingSetup} /> : null}
       {projectId ? (
         <ProjectSettingsDialog
           projectId={projectId}

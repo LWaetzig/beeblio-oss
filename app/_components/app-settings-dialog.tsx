@@ -48,28 +48,18 @@ function initialDrafts(snapshot: SettingsSnapshot): Partial<Record<SettingName, 
 }
 
 /**
- * App-wide settings, as opposed to the per-project ProjectSettingsDialog. It
- * renders every setting in lib/app-settings-registry.ts. Values are validated
- * and stored on the server; the browser only learns the last four characters
- * of a secret.
+ * Loads the settings while `active`, tracks edits, and saves them through the
+ * server, which validates every field. Shared by the Settings dialog and the
+ * welcome's setup step so both check values the same way.
  */
-export function AppSettingsDialog({
-  open,
-  onOpenChange,
-  onSaved,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  /** Lets the caller refresh anything that depends on setup being complete. */
-  onSaved?: (snapshot: SettingsSnapshot) => void;
-}) {
+export function useSettingsForm(active: boolean, onSaved?: (snapshot: SettingsSnapshot) => void) {
   const [snapshot, setSnapshot] = useState<SettingsSnapshot>();
   const [drafts, setDrafts] = useState<Partial<Record<SettingName, string>>>({});
   const [pending, setPending] = useState<"save" | SettingName>();
   const [error, setError] = useState<FieldError>();
 
   useEffect(() => {
-    if (!open) return;
+    if (!active) return;
     setSnapshot(undefined);
     setError(undefined);
     let cancelled = false;
@@ -79,11 +69,11 @@ export function AppSettingsDialog({
         setSnapshot(current);
         setDrafts(initialDrafts(current));
       })
-      .catch(() => { if (!cancelled) setError({ message: "Settings could not be loaded. Close and reopen this dialog to try again." }); });
+      .catch(() => { if (!cancelled) setError({ message: "Settings could not be loaded. Close this and open it again to retry." }); });
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [active]);
 
   const changes = useMemo(() => {
     if (!snapshot) return {};
@@ -100,22 +90,25 @@ export function AppSettingsDialog({
   }, [drafts, snapshot]);
   const hasChanges = Object.keys(changes).length > 0;
 
-  const apply = async (patch: Partial<Record<SettingName, string | null>>, busy: "save" | SettingName, success: string) => {
+  /** Resolves whether the save went through; problems are shown in `error`. */
+  const apply = async (patch: Partial<Record<SettingName, string | null>>, busy: "save" | SettingName, success: string): Promise<boolean> => {
     setPending(busy);
     setError(undefined);
     try {
       const result = await saveSettings(patch);
       if (!result.success) {
         setError({ message: result.error, field: result.field });
-        return;
+        return false;
       }
       setSnapshot(result.snapshot);
       setDrafts(initialDrafts(result.snapshot));
       onSaved?.(result.snapshot);
       toast.success(success);
       for (const warning of result.warnings) toast.warning(warning);
+      return true;
     } catch {
       setError({ message: "Settings could not be saved. Try again." });
+      return false;
     } finally {
       setPending(undefined);
     }
@@ -123,6 +116,27 @@ export function AppSettingsDialog({
 
   const busy = pending !== undefined;
   const fieldProps = { snapshot, drafts, error, busy, pending, setDraft: (name: SettingName, value: string) => { setDrafts((current) => ({ ...current, [name]: value })); setError(undefined); }, remove: (setting: SettingDefinition) => void apply({ [setting.name]: null }, setting.name as SettingName, `${setting.label} key removed`) };
+
+  return { snapshot, drafts, error, pending, busy, changes, hasChanges, apply, fieldProps };
+}
+
+/**
+ * App-wide settings, as opposed to the per-project ProjectSettingsDialog. It
+ * renders every setting in lib/app-settings-registry.ts. Values are validated
+ * and stored on the server; the browser only learns the last four characters
+ * of a secret.
+ */
+export function AppSettingsDialog({
+  open,
+  onOpenChange,
+  onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** Lets the caller refresh anything that depends on setup being complete. */
+  onSaved?: (snapshot: SettingsSnapshot) => void;
+}) {
+  const { snapshot, error, pending, busy, changes, hasChanges, apply, fieldProps } = useSettingsForm(open, onSaved);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -202,7 +216,7 @@ export function AppSettingsDialog({
   );
 }
 
-function SettingField({
+export function SettingField({
   setting,
   snapshot,
   drafts,

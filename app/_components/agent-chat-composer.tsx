@@ -283,6 +283,7 @@ export function AgentChatComposer({
         </div>
       ) : null}
       <PromptInput
+        data-tour="composer"
         accept="application/x-beeblio-workspace-upload"
         className="rounded-xl border-border bg-card shadow-sm"
         onDrop={(event) => {

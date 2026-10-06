@@ -43,7 +43,7 @@ Beeblio also runs as a desktop app for Apple Silicon Macs (macOS 12 or later) an
 
 ### Install
 
-Download the installer for your computer from the project's [Releases](https://github.com/alharkan7/beeblio-oss/releases): `…-mac-arm64.dmg` for Macs with Apple Silicon, or `…-win-x64.exe` for Windows. Intel Macs are not supported. On first launch, Beeblio opens **Settings**. Add your OpenRouter API key and choose a main model, and you can start chatting.
+Download the installer for your computer from the project's [Releases](https://github.com/alharkan7/beeblio-oss/releases): `…-mac-arm64.dmg` for Macs with Apple Silicon, or `…-win-x64.exe` for Windows. Intel Macs are not supported. On first launch, a short welcome connects a model (your OpenRouter API key and a main model) and creates your first project, which then opens with a tour of the workspace. **Show tour** in the account menu, or **Help → Show Tour**, runs it again.
 
 The installers are not signed with a developer certificate yet, so your system warns you the first time you open the app:
 
