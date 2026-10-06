@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, describe, test } from "node:test";
 
-import { extractMarkedPath, loginShellPath, mergePaths } from "../desktop/src/shell-path.ts";
+import { extractMarkedPath, loginShellPath } from "../desktop/src/shell-path.ts";
+import { mergePaths } from "../lib/path-list.ts";
 
 const posixOnly = process.platform === "win32" && "login shells are a macOS concern";
 
@@ -28,8 +29,8 @@ describe("login shell PATH", () => {
   });
 
   test("merging keeps the first occurrence and drops empty entries", () => {
-    const join = (...parts: string[]) => parts.join(path.delimiter);
-    assert.equal(mergePaths(join("/a", "", "/b"), join("/b", "/c"), undefined), join("/a", "/b", "/c"));
+    assert.equal(mergePaths(["/a::/b", "/b:/c", undefined], ":"), "/a:/b:/c");
+    assert.equal(mergePaths(["C:\\a;C:\\b", "C:\\a"], ";"), "C:\\a;C:\\b");
   });
 
   test("uses the PATH the user's profile sets, ahead of the minimal one", { skip: posixOnly }, async () => {

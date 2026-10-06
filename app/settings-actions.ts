@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { requireUser } from "@/lib/auth/session";
 import { appSetting, saveSettings as storeSettings, settingsSnapshot } from "@/lib/app-settings";
+import { checkSystemTools, type SystemToolStatus } from "@/lib/system-tools";
 import { isSettingName, settingDefinition, type SettingKind, type SettingName, type SettingsSnapshot } from "@/lib/app-settings-registry";
 
 type SaveResult =
@@ -29,6 +30,12 @@ const SCHEMAS: Record<SettingKind, z.ZodType<string>> = {
 export async function getSettings(): Promise<SettingsSnapshot> {
   await requireUser();
   return settingsSnapshot();
+}
+
+/** Which programs the agent uses are installed, checked with the agent's own shell and PATH. */
+export async function getSystemTools(): Promise<SystemToolStatus[]> {
+  await requireUser();
+  return checkSystemTools();
 }
 
 /** Whether the agent can run: the labels of required settings that are still missing. */

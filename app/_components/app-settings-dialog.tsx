@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowUpRight, ChevronRight, Loader2, Save, Trash2 } from "lucide-react";
+import { ArrowUpRight, CircleAlert, CircleCheck, ChevronRight, Loader2, RefreshCw, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -24,7 +24,8 @@ import {
   type SettingsSnapshot,
   type SettingStatus,
 } from "@/lib/app-settings-registry";
-import { getSettings, saveSettings } from "../settings-actions";
+import type { SystemToolStatus } from "@/lib/system-tools";
+import { getSettings, getSystemTools, saveSettings } from "../settings-actions";
 
 /** Pages where people get the values the dialog asks for. */
 const HELP_LINKS: Partial<Record<SettingName, { href: string; label: string }>> = {
@@ -182,6 +183,8 @@ export function AppSettingsDialog({
             );
           }) : null}
 
+          {snapshot ? <SystemToolsSection /> : null}
+
           {/* Repeated here because the field it belongs to may be in a collapsed section. */}
           {error ? <p className="text-xs text-destructive" role="alert">{error.message}</p> : null}
           <DialogFooter className="sticky bottom-0 -mx-1 bg-background/95 px-1 pt-2 backdrop-blur">
@@ -274,5 +277,87 @@ function SettingField({
       />
       {fieldError ? <p id={`${id}-error`} className="text-xs text-destructive">{fieldError}</p> : null}
     </div>
+  );
+}
+
+/**
+ * Programs the agent runs on this computer (lib/system-tools.ts). Checked only
+ * when the section is opened, because the checks start a shell per tool.
+ */
+function SystemToolsSection() {
+  const [open, setOpen] = useState(false);
+  const [tools, setTools] = useState<SystemToolStatus[]>();
+  const [checking, setChecking] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  const check = async () => {
+    setChecking(true);
+    setFailed(false);
+    try {
+      setTools(await getSystemTools());
+    } catch {
+      setFailed(true);
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const missing = tools?.filter((tool) => !tool.found).length ?? 0;
+  return (
+    <Collapsible
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (next && !tools && !checking) void check();
+      }}
+      className="group/section flex flex-col gap-3"
+    >
+      <CollapsibleTrigger className="flex items-center gap-2 rounded-md outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20">
+        <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=open]/section:rotate-90" aria-hidden="true" />
+        <div className="min-w-0 text-left">
+          <p className="text-xs font-medium">System Tools</p>
+          <p className="text-[11px] text-muted-foreground">Programs on this computer that the agent runs.{tools ? ` ${missing ? `${missing} missing.` : "All found."}` : ""}</p>
+        </div>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="flex flex-col gap-3 rounded-lg border p-3">
+        {checking && !tools ? <p className="text-xs text-muted-foreground">Checking…</p> : null}
+        {failed ? <p className="text-xs text-destructive" role="alert">The tools could not be checked. Try again.</p> : null}
+        {tools ? (
+          <ul className="flex flex-col gap-2.5" aria-label="System tools">
+            {tools.map((tool) => (
+              <li key={tool.id} className="flex gap-2">
+                {tool.found ? <CircleCheck className="mt-0.5 size-3.5 shrink-0 text-emerald-600" aria-label="Found" /> : <CircleAlert className="mt-0.5 size-3.5 shrink-0 text-amber-600" aria-label="Missing" />}
+                <div className="min-w-0 text-xs">
+                  <p className="font-medium">
+                    {tool.label}
+                    {tool.detail ? <span className="ml-1.5 font-normal text-muted-foreground">{tool.detail}</span> : null}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">{tool.purpose}</p>
+                  {tool.hint ? (
+                    <p className="text-[11px]">
+                      {/* A hint with a link is the link; one with a command shows the command to copy. */}
+                      {tool.hint.href ? (
+                        <a href={tool.hint.href} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-primary underline decoration-primary/30 underline-offset-2 hover:decoration-primary">
+                          {tool.hint.text}<ArrowUpRight className="size-3" aria-hidden="true" />
+                        </a>
+                      ) : (
+                        tool.hint.text
+                      )}
+                      {tool.hint.command ? <> <code className="rounded bg-muted px-1 py-0.5 select-all">{tool.hint.command}</code></> : null}
+                    </p>
+                  ) : null}
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        <div>
+          <Button type="button" variant="outline" size="sm" onClick={() => void check()} disabled={checking}>
+            {checking ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+            Check again
+          </Button>
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }

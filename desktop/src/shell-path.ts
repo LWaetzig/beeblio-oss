@@ -1,6 +1,8 @@
 import { execFile } from "node:child_process";
 import path from "node:path";
 
+import { mergePaths } from "../../lib/path-list";
+
 /**
  * macOS starts apps opened from Finder or the Dock with a minimal PATH
  * (/usr/bin:/bin:/usr/sbin:/sbin), not the one a terminal gets from the
@@ -30,21 +32,6 @@ export function extractMarkedPath(output: string): string | undefined {
   return value || undefined;
 }
 
-/** Joins PATH lists in order of preference, dropping empty and repeated entries. */
-export function mergePaths(...lists: Array<string | undefined>): string {
-  const seen = new Set<string>();
-  const entries: string[] = [];
-  for (const list of lists) {
-    for (const entry of (list ?? "").split(path.delimiter)) {
-      if (entry && !seen.has(entry)) {
-        seen.add(entry);
-        entries.push(entry);
-      }
-    }
-  }
-  return entries.join(path.delimiter);
-}
-
 /**
  * The login shell's PATH merged with the current one, or the current one plus
  * the usual Homebrew folders if the shell fails or takes longer than
@@ -57,5 +44,5 @@ export async function loginShellPath({ shell = process.env.SHELL || "/bin/zsh", 
     execFile(shell, ["-ilc", script], { timeout: timeoutMs, env: { ...process.env, DISABLE_AUTO_UPDATE: "true" } }, (error, stdout) => resolve(error ? undefined : stdout));
   });
   const fromShell = output === undefined ? undefined : extractMarkedPath(output);
-  return fromShell ? mergePaths(fromShell, currentPath) : mergePaths(currentPath, COMMON_TOOL_DIRS.join(path.delimiter));
+  return fromShell ? mergePaths([fromShell, currentPath], path.delimiter) : mergePaths([currentPath, ...COMMON_TOOL_DIRS], path.delimiter);
 }

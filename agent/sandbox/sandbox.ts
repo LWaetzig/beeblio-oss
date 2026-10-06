@@ -5,7 +5,7 @@ import { Readable } from "node:stream";
 import { defineSandbox, type SandboxBackend, type SandboxSession, type SandboxProcess, type SandboxRunOptions } from "eve/sandbox";
 import { getWorkspaceIdentity } from "../workspace-paths";
 import { projectFolder } from "../../lib/workspace-files";
-import { appRoot } from "../../lib/app-paths";
+import { agentEnvironment, agentShell } from "../../lib/agent-environment";
 
 type SessionOptions = { folder: string };
 const processes = new Map<string, Set<ReturnType<typeof spawn>>>();
@@ -26,15 +26,12 @@ function makeSession(sessionKey: string, state: { folder?: string }): SandboxSes
     const root = folder();
     const workingDirectory = options.workingDirectory ? await safePath(options.workingDirectory) : root;
     const command = options.command.replace(/\/workspace(?=\/|\b)/g, '"${BEEBLIO_PROJECT_DIR}"');
-    const child = spawn(process.env.BEEBLIO_BASH || "bash", ["-lc", command], {
+    const child = spawn(agentShell(), ["-lc", command], {
       cwd: workingDirectory,
       env: {
-        ...process.env,
+        ...(agentEnvironment() as NodeJS.ProcessEnv),
         ...options.env,
         BEEBLIO_PROJECT_DIR: root,
-        BEEBLIO_SKILLS_DIR: path.join(appRoot(), "agent", "skills"),
-        NODE_PATH: [path.join(appRoot(), "node_modules"), process.env.NODE_PATH].filter(Boolean).join(path.delimiter),
-        PYTHONPATH: [path.join(appRoot(), "agent", "sandbox"), process.env.PYTHONPATH].filter(Boolean).join(path.delimiter),
       },
       stdio: ["ignore", "pipe", "pipe"],
       signal: options.abortSignal,
