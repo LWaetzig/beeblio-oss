@@ -8,6 +8,7 @@
 //   app/      agent/skills and agent/sandbox, read by both servers (BEEBLIO_APP_ROOT)
 //   drizzle/  SQLite migrations
 //   node/     the Node.js 24 binary that runs all of the above
+//   parent-watchdog.mjs  stops the servers if the app dies (see scripts/)
 //
 // Run it after a flat install (`pnpm install --config.node-linker=hoisted`),
 // `BEEBLIO_STANDALONE=1 pnpm build`, and `pnpm build:eve` in the
@@ -105,6 +106,7 @@ copy(path.join(repo, "agent", "skills"), path.join(bundle, "app", "agent", "skil
 // Only the Python helpers; the TypeScript there is compiled into the agent.
 copy(path.join(repo, "agent", "sandbox"), path.join(bundle, "app", "agent", "sandbox"), (file) => statSync(file).isDirectory() || !/\.tsx?$/.test(file));
 copy(path.join(repo, "drizzle"), path.join(bundle, "drizzle"));
+copy(path.join(repo, "scripts", "parent-watchdog.mjs"), path.join(bundle, "parent-watchdog.mjs"));
 
 const nodeBinary = path.join(bundle, "node", path.basename(process.execPath));
 copy(process.execPath, nodeBinary);

@@ -6,6 +6,7 @@ import path from "node:path";
 import { once } from "node:events";
 import { realpath } from "node:fs/promises";
 import { describe, test } from "node:test";
+import { pathToFileURL } from "node:url";
 
 import { startLocalServers, terminate } from "../scripts/local-servers.mjs";
 
@@ -25,12 +26,16 @@ async function freePort() {
  * health check the launcher waits for.
  */
 function writeFakeBundle(root, reportDir) {
-  const report = (name) => `process.getBuiltinModule("node:fs").writeFileSync(${JSON.stringify(path.join(reportDir, `${name}.json`))}, JSON.stringify({ cwd: process.cwd(), argv: process.argv.slice(2), env: process.env }));`;
+  // The real watchdog: the bundle layout loads it from the bundle's root.
+  writeFileSync(path.join(root, "parent-watchdog.mjs"), readFileSync(path.join(import.meta.dirname, "..", "scripts", "parent-watchdog.mjs")));
+  const report = (name) => `process.getBuiltinModule("node:fs").writeFileSync(${JSON.stringify(path.join(reportDir, `${name}.json`))}, JSON.stringify({ pid: process.pid, cwd: process.cwd(), argv: process.argv.slice(2), env: process.env }));`;
   const serve = (name, body) => `${report(name)}\nprocess.getBuiltinModule("node:http").createServer((req, res) => res.end(${JSON.stringify(body)})).listen(Number(process.env.PORT), process.env.HOSTNAME || process.env.HOST);`;
   for (const dir of ["ui", "agent/server", "drizzle"]) mkdirSync(path.join(root, dir), { recursive: true });
   writeFileSync(path.join(root, "ui", "migrate.mjs"), report("migrate"));
   writeFileSync(path.join(root, "ui", "server.js"), serve("next", "ok"));
-  writeFileSync(path.join(root, "agent", "server", "index.mjs"), serve("eve", "ok"));
+  // Stands in for the agent running a long shell command.
+  const agentCommand = `const command = process.getBuiltinModule("node:child_process").spawn("sleep", ["60"], { stdio: "ignore" });\nprocess.getBuiltinModule("node:fs").writeFileSync(${JSON.stringify(path.join(reportDir, "command.pid"))}, String(command.pid));\n`;
+  writeFileSync(path.join(root, "agent", "server", "index.mjs"), (process.platform === "win32" ? "" : agentCommand) + serve("eve", "ok"));
 }
 
 const posixOnly = process.platform === "win32" && "process groups are POSIX-only; Windows uses taskkill /T";
@@ -112,6 +117,33 @@ describe("terminate", () => {
 });
 
 describe("startLocalServers", () => {
+  test("servers stop on their own when whatever started them is killed", { skip: posixOnly, timeout: 30_000 }, async (t) => {
+    const root = mkdtempSync(path.join(tmpdir(), "beeblio-orphans-"));
+    const reports = path.join(root, "reports");
+    mkdirSync(reports);
+    writeFakeBundle(root, reports);
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    const [uiPort, agentPort] = [await freePort(), await freePort()];
+    // A launcher in its own process, like the desktop app, so the test can kill it without warning.
+    const launcherSource = `
+      import { startLocalServers } from ${JSON.stringify(pathToFileURL(path.join(import.meta.dirname, "..", "scripts", "local-servers.mjs")).href)};
+      const servers = await startLocalServers({ root: ${JSON.stringify(root)}, layout: "bundle", uiPort: ${uiPort}, agentPort: ${agentPort}, dataDir: ${JSON.stringify(path.join(root, "data"))}, onOutput: () => {} });
+      await servers.waitUntilReady({ timeoutMs: 15000 });
+      console.log("ready");
+    `;
+    const launcher = spawn(process.execPath, ["--input-type=module", "-e", launcherSource], { stdio: ["ignore", "pipe", "inherit"] });
+    await firstLine(launcher);
+    const read = (name) => JSON.parse(readFileSync(path.join(reports, `${name}.json`), "utf8"));
+    const pids = [read("next").pid, read("eve").pid, Number(readFileSync(path.join(reports, "command.pid"), "utf8"))];
+    assert.ok(pids.every(isAlive));
+
+    launcher.kill("SIGKILL");
+
+    // Generous: the watchdog escalates to SIGKILL after 3 s, and a loaded machine can be slow to deliver signals.
+    for (let i = 0; i < 300 && pids.some(isAlive); i++) await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.deepEqual(pids.filter(isAlive), [], "processes left behind");
+  });
+
   test("runs the desktop app's staged servers with their state in the data folder", async (t) => {
     const root = mkdtempSync(path.join(tmpdir(), "beeblio-bundle-"));
     const dataDir = path.join(root, "user-data");

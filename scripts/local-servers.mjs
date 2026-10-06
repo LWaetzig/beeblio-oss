@@ -1,6 +1,7 @@
 import { execFile, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import dotenv from "dotenv";
 
 const HOST = "127.0.0.1";
@@ -55,9 +56,19 @@ export async function startLocalServers({
   // On macOS and Linux each long-running server leads its own process group, so
   // stopping it also reaches its workers and the agent's shell commands (see
   // terminate). The short migration stays in our group so Ctrl+C still stops it.
+  //
+  // Servers also get a stdin pipe that is never written to: the parent
+  // watchdog stops a server when that pipe closes because we died.
   function start(name, { ownProcessGroup = false } = {}) {
     const { args, cwd, env: serverEnv } = commands[name];
-    const child = spawn(nodePath, args, { cwd, env: { ...env, ...serverEnv }, detached: ownProcessGroup && !IS_WINDOWS, stdio: onOutput ? ["ignore", "pipe", "pipe"] : "inherit", windowsHide: true });
+    const output = onOutput ? "pipe" : "inherit";
+    const child = spawn(nodePath, args, {
+      cwd,
+      env: { ...env, ...serverEnv, ...(ownProcessGroup ? { BEEBLIO_PARENT_WATCHDOG: "1" } : {}) },
+      detached: ownProcessGroup && !IS_WINDOWS,
+      stdio: [ownProcessGroup ? "pipe" : "ignore", output, output],
+      windowsHide: true,
+    });
     if (onOutput) for (const stream of [child.stdout, child.stderr]) stream.on("data", (chunk) => onOutput(name, chunk));
     return child;
   }
@@ -116,20 +127,24 @@ export function missingProductionBuilds(root) {
  * data folder, because it keeps workflow state in .eve/ under it.
  */
 function serverCommands({ root, layout, mode, uiPort, agentPort, dataDir, databasePath }) {
+  // See parent-watchdog.mjs. --import takes a URL, which a Windows path with a drive letter is not.
+  const watchdog = (file) => ["--import", pathToFileURL(file).href];
   if (layout === "bundle") {
+    const guarded = watchdog(path.join(root, "parent-watchdog.mjs"));
     return {
       migrate: { args: [path.join(root, "ui", "migrate.mjs"), databasePath, path.join(root, "drizzle")], cwd: dataDir },
-      next: { args: [path.join(root, "ui", "server.js")], cwd: dataDir, env: { PORT: String(uiPort), HOSTNAME: HOST, NODE_ENV: "production" } },
-      eve: { args: [path.join(root, "agent", "server", "index.mjs")], cwd: dataDir, env: { PORT: String(agentPort), HOST, NODE_ENV: "production" } },
+      next: { args: [...guarded, path.join(root, "ui", "server.js")], cwd: dataDir, env: { PORT: String(uiPort), HOSTNAME: HOST, NODE_ENV: "production" } },
+      eve: { args: [...guarded, path.join(root, "agent", "server", "index.mjs")], cwd: dataDir, env: { PORT: String(agentPort), HOST, NODE_ENV: "production" } },
     };
   }
   if (layout !== "checkout") throw new Error(`Unknown server layout "${layout}"`);
+  const guarded = watchdog(path.join(root, "scripts", "parent-watchdog.mjs"));
   const next = binEntry(root, "next");
   const eve = binEntry(root, "eve");
   return {
     migrate: { args: [path.join(root, "scripts", "migrate.mjs"), databasePath, path.join(root, "drizzle")], cwd: root },
-    next: { args: [next, mode, "--hostname", HOST, "--port", String(uiPort)], cwd: root },
-    eve: { args: [eve, ...(mode === "dev" ? ["dev", "--no-ui"] : ["start"]), "--host", HOST, "--port", String(agentPort)], cwd: root },
+    next: { args: [...guarded, next, mode, "--hostname", HOST, "--port", String(uiPort)], cwd: root },
+    eve: { args: [...guarded, eve, ...(mode === "dev" ? ["dev", "--no-ui"] : ["start"]), "--host", HOST, "--port", String(agentPort)], cwd: root },
   };
 }
 
