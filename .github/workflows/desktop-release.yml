@@ -65,8 +65,18 @@ jobs:
       - run: pnpm build:eve
       - run: pnpm install --frozen-lockfile
         working-directory: desktop
-      - run: pnpm dist
+      - name: Build the installer
         working-directory: desktop
+        # Git Bash on Windows.
+        shell: bash
+        # An expression cannot leave a variable out, so a missing secret arrives
+        # as an empty string, and electron-builder reads an empty CSC_LINK as a
+        # certificate path (the working directory). Missing must mean unset.
+        run: |
+          for name in CSC_LINK CSC_KEY_PASSWORD WIN_CSC_LINK WIN_CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            [ -n "${!name}" ] || unset "$name"
+          done
+          pnpm dist
         env:
           # All optional. Without them the macOS build is ad-hoc signed and
           # the Windows installer is unsigned; see the README's "Signing".
