@@ -10,9 +10,10 @@
 //   node/     the Node.js 24 binary that runs all of the above
 //   parent-watchdog.mjs  stops the servers if the app dies (see scripts/)
 //
-// Run it after a flat install (`pnpm install --config.node-linker=hoisted`),
-// `BEEBLIO_STANDALONE=1 pnpm build`, and `pnpm build:eve` in the
-// repository root. The Node.js binary is the one running this script, so the
+// Run it after a flat install, `BEEBLIO_STANDALONE=1 pnpm build`, and
+// `pnpm build:eve` in the repository root, all with pnpm_config_node_linker=hoisted
+// in the environment: pnpm checks dependencies before each script, and with
+// only an install flag it would put them back in the linked layout. The Node.js binary is the one running this script, so the
 // native modules installed for it (better-sqlite3, sharp) match.
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -85,7 +86,10 @@ requireFile(path.join(repo, ".output", "server", "index.mjs"), "Build the agent 
 // links into node_modules/.pnpm. Resolved into copies, as an installer needs,
 // they can no longer find them, so the UI must come from a flat install.
 if (existsSync(path.join(repo, ".next", "standalone", "node_modules", ".pnpm"))) {
-  fail("the standalone build uses pnpm's linked node_modules, which cannot be packaged. Reinstall with a flat layout and rebuild:\n  pnpm install --frozen-lockfile --config.node-linker=hoisted\n  BEEBLIO_STANDALONE=1 pnpm build");
+  fail(`the standalone build uses pnpm's linked node_modules, which cannot be packaged. Set the flat layout for the whole shell session (not as an install flag, which the next pnpm script undoes), then reinstall and rebuild:
+  export pnpm_config_node_linker=hoisted   (PowerShell: $env:pnpm_config_node_linker="hoisted")
+  pnpm install --frozen-lockfile
+  BEEBLIO_STANDALONE=1 pnpm build`);
 }
 
 rmSync(bundle, { recursive: true, force: true });

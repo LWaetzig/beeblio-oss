@@ -81,19 +81,21 @@ pnpm desktop
 
 ### Build the installers
 
-Installers are built on the platform they are for: an Apple Silicon Mac builds the `.dmg`, Windows the `.exe`. The UI must come from a flat install, because pnpm's linked `node_modules` cannot be packaged:
+Installers are built on the platform they are for: an Apple Silicon Mac builds the `.dmg`, Windows the `.exe`. The UI must come from a flat install, because pnpm's linked `node_modules` cannot be packaged. Set the layout for the whole shell session rather than as an install flag: pnpm checks dependencies before running a script and would reinstall them in the linked layout.
 
 ```bash
-pnpm install --frozen-lockfile --config.node-linker=hoisted
-BEEBLIO_STANDALONE=1 pnpm build   # PowerShell: $env:BEEBLIO_STANDALONE=1; pnpm build
+export pnpm_config_node_linker=hoisted BEEBLIO_STANDALONE=1
+# PowerShell: $env:pnpm_config_node_linker="hoisted"; $env:BEEBLIO_STANDALONE=1
+pnpm install --frozen-lockfile
+pnpm build
 pnpm build:eve
 pnpm --dir desktop install
 pnpm --dir desktop dist
 ```
 
-The installer is written to `desktop/release/`. Run `pnpm install` again afterwards to return to the usual layout. On Linux, `pnpm --dir desktop dist` builds an unpacked app in `desktop/release/linux-unpacked` for testing; it is not released.
+The installer is written to `desktop/release/`. Run `pnpm install` again in a new shell afterwards to return to the usual layout. On Linux, `pnpm --dir desktop dist` builds an unpacked app in `desktop/release/linux-unpacked` for testing; it is not released.
 
-**Releases:** set the new version in `desktop/package.json` and push a tag such as `v0.2.0`. The [Desktop release](.github/workflows/desktop-release.yml) workflow builds both installers and attaches them to a draft GitHub Release, which you review and publish. It also builds them, without a release, for pushes and pull requests that change the desktop app or its packaging, and when run by hand.
+**Releases:** set the new version in `desktop/package.json` and push a tag such as `v0.2.0`. The [Desktop release](.github/workflows/desktop-release.yml) workflow builds both installers and attaches them to a draft GitHub Release, which you review and publish. It also builds them, without a release, for pushes and pull requests that change more than documentation, and when run by hand.
 
 **Signing:** the workflow signs builds once these repository secrets exist, and works without them:
 

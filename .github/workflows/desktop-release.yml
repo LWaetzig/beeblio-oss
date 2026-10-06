@@ -10,26 +10,13 @@ on:
   push:
     tags: ["v*"]
     # Work branches too, so installers are known to build before a pull request
-    # exists. Path filters are not applied to tag pushes, so tags always build.
+    # exists. The installers package the whole app and the job runs its tests,
+    # so only documentation changes are skipped. Path filters are not applied
+    # to tag pushes, so tags always build.
     branches: ["**"]
-    paths:
-      - "desktop/**"
-      - "agent/sandbox/**"
-      - "scripts/**"
-      - "next.config.ts"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - ".github/workflows/desktop-release.yml"
+    paths-ignore: ["**/*.md", "LICENSE.md"]
   pull_request:
-    # Keep in step with the list above.
-    paths:
-      - "desktop/**"
-      - "agent/sandbox/**"
-      - "scripts/**"
-      - "next.config.ts"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - ".github/workflows/desktop-release.yml"
+    paths-ignore: ["**/*.md", "LICENSE.md"]
   workflow_dispatch:
 
 permissions:
@@ -55,6 +42,11 @@ jobs:
     env:
       # next.config.ts: build the UI as a self-contained server.
       BEEBLIO_STANDALONE: "1"
+      # Flat node_modules: pnpm's links do not survive packaging (see
+      # desktop/scripts/stage.mjs). Set for the job, not as an install flag:
+      # pnpm checks dependencies before each script and would otherwise
+      # reinstall them in the linked layout before the build.
+      pnpm_config_node_linker: hoisted
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -67,8 +59,7 @@ jobs:
           cache-dependency-path: |
             pnpm-lock.yaml
             desktop/pnpm-lock.yaml
-      # Flat node_modules: pnpm's links do not survive packaging (see desktop/scripts/stage.mjs).
-      - run: pnpm install --frozen-lockfile --config.node-linker=hoisted
+      - run: pnpm install --frozen-lockfile
       - run: pnpm test
       - run: pnpm build
       - run: pnpm build:eve
