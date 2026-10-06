@@ -13,8 +13,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "start": "pnpm build && electron .",
     "dev": "pnpm build && electron . --dev",
-    "stage": "node scripts/stage.mjs",
-    "dist": "pnpm typecheck && pnpm build && pnpm stage && electron-builder --config electron-builder.config.cjs --publish never"
+    "dist": "pnpm run typecheck && pnpm run build && pnpm run bundle && electron-builder --config electron-builder.config.cjs --publish never",
+    "bundle": "node scripts/stage.mjs"
   },
   "devDependencies": {
     "@types/node": "24.x",

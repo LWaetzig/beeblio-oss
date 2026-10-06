@@ -37,12 +37,15 @@ permissions:
 
 concurrency:
   group: desktop-release-${{ github.ref }}
-  cancel-in-progress: false
+  # A newer push replaces a branch build that is still running; release (tag) builds are never cancelled.
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   build:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
+    # A build takes about 10 minutes; anything longer is a hang, which would otherwise run for 6 hours.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -100,6 +103,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
