@@ -6,8 +6,10 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, screen, session, shell, type MenuItemConstructorOptions, type Rectangle, type WebPreferences } from "electron";
 import { missingProductionBuilds, startLocalServers, type LocalServerName, type LocalServers } from "../../scripts/local-servers.mjs";
+import electronUpdater from "electron-updater";
 import { registerScreenCapture } from "./screen-capture";
 import { loginShellPath } from "./shell-path";
+import { effectiveUpdateMode, startUpdates } from "./updates";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const loadingPage = path.join(here, "../static/loading.html");
@@ -36,6 +38,19 @@ const uiPort = Number(process.env.BEEBLIO_DESKTOP_PORT || 3210);
 const uiOrigin = `http://127.0.0.1:${uiPort}`;
 const windowStateFile = () => path.join(app.getPath("userData"), "window-state.json");
 const serverLabels: Record<LocalServerName, string> = { migrate: "database migration", next: "interface server", eve: "agent server" };
+/**
+ * Written into the packaged package.json by electron-builder.config.cjs: how
+ * far updates go for this build, and the repository it was released from.
+ */
+const buildInfo = (() => {
+  try {
+    const meta = JSON.parse(readFileSync(path.join(app.getAppPath(), "package.json"), "utf8")) as { beeblio?: { updates?: string; releaseRepo?: string } };
+    return meta.beeblio ?? {};
+  } catch {
+    return {};
+  }
+})();
+const releaseRepo = buildInfo.releaseRepo || "alharkan7/beeblio-oss";
 /** Page loads retried while a restarted server comes back, before asking the person. */
 const MAX_LOAD_RETRIES = 5;
 
@@ -46,6 +61,7 @@ let recentLog: string[] = [];
 let starting = false;
 let stopReason: string | undefined;
 let quitting = false;
+let updates: ReturnType<typeof startUpdates> | undefined;
 
 const secureWebPreferences = (): WebPreferences => ({
   preload: path.join(here, "preload.cjs"),
@@ -193,6 +209,34 @@ async function serverStopped(name: LocalServerName, code: number | string | null
   app.quit();
 }
 
+/** Stops the servers for good: when quitting, and before an update's installer replaces their files. */
+async function stopServersForQuit(): Promise<void> {
+  quitting = true;
+  const running = servers;
+  servers = undefined;
+  await running?.stop();
+}
+
+function createUpdates() {
+  const { autoUpdater } = electronUpdater;
+  const write = (level: string) => (message: unknown) => log("updates", `${level}: ${String(message)}\n`);
+  autoUpdater.logger = { info: write("info"), warn: write("warn"), error: write("error"), debug: () => {} };
+  return startUpdates({
+    mode: effectiveUpdateMode(buildInfo.updates, { packaged: app.isPackaged, platform: process.platform }),
+    updater: autoUpdater,
+    currentVersion: app.getVersion(),
+    releaseRepo,
+    ask: async (options) => {
+      const owner = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
+      const result = owner ? await dialog.showMessageBox(owner, options) : await dialog.showMessageBox(options);
+      return result.response;
+    },
+    openExternal: (url) => void shell.openExternal(url),
+    log: (message) => log("updates", `${message}\n`),
+    prepareToInstall: stopServersForQuit,
+  });
+}
+
 type WindowState = Rectangle & { maximized?: boolean };
 
 function savedWindowState(): WindowState | undefined {
@@ -283,6 +327,7 @@ function buildMenu() {
       label: app.name,
       submenu: [
         { role: "about" },
+        { label: "Check for Updates…", click: () => void updates?.checkNow() },
         { type: "separator" },
         settingsItem,
         { type: "separator" },
@@ -313,7 +358,8 @@ function buildMenu() {
       role: "help",
       submenu: [
         { label: "Show Tour", click: () => sendToApp("beeblio:show-tour") },
-        { label: "Beeblio on GitHub", click: () => void shell.openExternal("https://github.com/alharkan7/beeblio-oss") },
+        ...(isMac ? [] : [{ label: "Check for Updates…", click: () => void updates?.checkNow() }, { type: "separator" } as const]),
+        { label: "Beeblio on GitHub", click: () => void shell.openExternal(`https://github.com/${releaseRepo}`) },
       ],
     },
   ];
@@ -361,10 +407,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on("before-quit", (event) => {
     if (!servers) return;
     event.preventDefault();
-    quitting = true;
-    const running = servers;
-    servers = undefined;
-    void running.stop().finally(() => { logStream?.end(); app.quit(); });
+    void stopServersForQuit().finally(() => { logStream?.end(); app.quit(); });
   });
   // SIGHUP too: the servers run in their own process groups, so a closed terminal no longer reaches them directly.
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.on(signal, () => app.quit());
@@ -380,10 +423,12 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   // Not a top-level await: Electron does not emit "ready" until an ESM entry finishes evaluating.
-  void app.whenReady().then(() => {
+  void app.whenReady().then(async () => {
     restrictWebContents();
+    updates = createUpdates();
     buildMenu();
     createMainWindow();
-    return startServers();
+    await startServers();
+    if (servers) updates.schedule();
   });
 }
